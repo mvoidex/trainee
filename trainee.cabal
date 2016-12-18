@@ -25,6 +25,7 @@ library
     aeson == 1.0.*,
     base-unicode-symbols == 0.2.*,
     containers == 0.5.*,
+    deepseq,
     hmatrix == 0.18.*,
     lens == 4.*,
     mtl == 2.*,

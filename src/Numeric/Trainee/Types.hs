@@ -12,6 +12,7 @@ import Prelude hiding (id, (.))
 import Prelude.Unicode
 
 import Control.Category
+import Control.DeepSeq
 import Control.Lens
 import Data.List (intersperse, intercalate)
 
@@ -38,6 +39,9 @@ instance Ow Gradee where
 
 data NoParams = NoParams deriving (Eq, Ord, Read, Enum, Bounded)
 
+instance NFData NoParams where
+	rnf NoParams = ()
+
 instance Show NoParams where
 	show NoParams = ""
 
@@ -55,6 +59,9 @@ instance Fractional NoParams where
 
 data PairParams l r = PairParams l r deriving (Eq, Ord, Read)
 
+instance (NFData l, NFData r) ⇒ NFData (PairParams l r) where
+	rnf (PairParams x y) = rnf x `seq` rnf y
+
 instance (Show l, Show r) ⇒ Show (PairParams l r) where
 	show (PairParams x y) = intercalate "\n" $ intersperse (replicate 10 '-') $
 		filter (not ∘ null) [show x, show y]
@@ -71,13 +78,16 @@ instance (Fractional l, Fractional r) ⇒ Fractional (PairParams l r) where
 	fromRational r = PairParams (fromRational r) (fromRational r)
 	recip (PairParams l r) = PairParams (recip l) (recip r)
 
-type Parametric w = (Read w, Show w, Num w, Fractional w)
+type Parametric w = (Read w, Show w, Num w, Fractional w, NFData w)
 
 data LearneeT w a b = LearneeT {
 	_params ∷ w,
 	_forwardPass ∷ w → a → (b, b → (a, w)) }
 
 makeLenses ''LearneeT
+
+instance NFData w ⇒ NFData (LearneeT w a b) where
+	rnf (LearneeT ws _) = rnf ws
 
 instance Show w ⇒ Show (LearneeT w a b) where
 	show (LearneeT ws _) = show ws
@@ -87,6 +97,9 @@ data Learnee a b where
 
 toLearnee ∷ Parametric w ⇒ LearneeT w a b → Learnee a b
 toLearnee (LearneeT ws fn) = Learnee ws fn
+
+instance NFData (Learnee a b) where
+	rnf (Learnee ws _) = rnf ws
 
 instance Show (Learnee a b) where
 	show (Learnee ws _) = show ws
