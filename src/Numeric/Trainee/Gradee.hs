@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, TypeFamilies #-}
 
 module Numeric.Trainee.Gradee (
 	Gradee(..), gradee, ad,
@@ -6,7 +6,7 @@ module Numeric.Trainee.Gradee (
 	unary, binary,
 	dup, conjoin, swap,
 
-	matMat, matVec
+	matMat, matVec, odot
 	) where
 
 import Prelude hiding (id, (.))
@@ -62,3 +62,7 @@ matMat = gradee (uncurry (<>)) backprop where
 matVec ∷ Numeric a ⇒ Gradee (Matrix a, Vector a) (Vector a)
 matVec = gradee (uncurry (#>)) backprop where
 	backprop (a, b) dc = (outer dc b, tr a #> dc)
+
+odot ∷ Num (Vector a) ⇒ Gradee (Vector a, Vector a) (Vector a)
+odot = gradee (uncurry (+)) backprop where
+	backprop _ dc = (dc, dc)

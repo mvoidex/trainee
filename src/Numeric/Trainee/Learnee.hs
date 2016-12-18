@@ -1,134 +1,147 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, TypeFamilies, MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, FlexibleInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Numeric.Trainee.Learnee (
-	CombineResult, Combine(..),
 	eval,
-	(⇉), (‖), into, paired,
+	(⇉), (⇉′), (′⇉), (⥤), (‖), into, paired,
 	cost, squared,
+	learneeT, computeeT,
 	learnee, computee,
 
-	trainOnce, trainBatch, trainUntil
+	makeBatches, shuffleList,
+
+	miss, avg,
+	runLearnT, runLearn,
+	learnPass, trainOnce, trainBatch, trainEpoch, trainUntil
 	) where
 
 import Prelude.Unicode
 
 import Control.Arrow ((***))
 import Control.Lens
+import Control.Monad.State
+import Control.Monad.Writer
 import Data.List (unfoldr)
-import Data.Proxy
 import Data.Random (runRVar, StdRandom(..), MonadRandom)
+import Data.Random.Internal.Source
 import Data.Random.List (shuffle)
 import Numeric.AD (AD)
 import Numeric.AD.Mode.Forward (Forward, auto, diff')
 
 import Numeric.Trainee.Types
 
-type family CombineResult a b where
-	CombineResult () () = ()
-	CombineResult a () = a
-	CombineResult () b = b
-	CombineResult a b = (a, b)
-
-class Combine a b where
-	combine ∷ a → b → CombineResult a b
-	uncombine ∷ Proxy (a, b) → CombineResult a b → (a, b)
-
-instance Combine () () where
-	combine _ _ = ()
-	uncombine _ () = ((), ())
-
-instance Combine a () where
-	combine x _ = x
-	uncombine _ x = (x, ())
-
-instance Combine () b where
-	combine _ y = y
-	uncombine _ y = ((), y)
-
-instance {-# OVERLAPPABLE #-} (CombineResult a b ~ (a, b)) ⇒ Combine a b where
-	combine x y = (x, y)
-	uncombine _ (x, y) = (x, y)
-
-eval ∷ Learnee w a b → a → b
+eval ∷ Learnee a b → a → b
 eval (Learnee ws f) = fst ∘ f ws
 
-(⇉) ∷ Combine w w' ⇒ Learnee w a b → Learnee w' b c → Learnee (CombineResult w w') a c
-Learnee lws f ⇉ Learnee rws g = Learnee ws h where
-	h ws' x = (z, up) where
-		(lws', rws') = uncombine (proxyOf (lws, rws)) ws'
+(⇉) ∷ LearneeT w a b → LearneeT w' b c → LearneeT (Chain w w') a c
+LearneeT lws f ⇉ LearneeT rws g = LearneeT (Chain (lws, rws)) h where
+	h (Chain (lws', rws')) x = (z, up) where
 		(y, f') = f lws' x
 		(z, g') = g rws' y
-		up dz = (dx, combine lws'' rws'') where
+		up dz = (dx, Chain (lws'', rws'')) where
 			(dy, rws'') = g' dz
 			(dx, lws'') = f' dy
-	ws = combine lws rws
 
-into ∷ Combine w w' ⇒ Learnee w a b → Learnee w' b c → Learnee (CombineResult w w') a c
+(⇉′) ∷ LearneeT w a b → LearneeT NoParams b c → LearneeT w a c
+l ⇉′ r = mapP (iso (fst ∘ getChain) (Chain ∘ flip (,) NoParams)) $ l ⇉ r
+
+(′⇉) ∷ LearneeT NoParams a b → LearneeT w b c → LearneeT w a c
+l ′⇉ r = mapP (iso (snd ∘ getChain) (Chain ∘ (,) NoParams)) $ l ⇉ r
+
+(⥤) ∷ Learnee a b → Learnee b c → Learnee a c
+l ⥤ r = withLearnee l $ \l' → withLearnee r $ \r' → toLearnee (l' ⇉ r')
+
+into ∷ LearneeT w a b → LearneeT w' b c → LearneeT (Chain w w') a c
 into = (⇉)
 
-(‖) ∷ Combine w w' ⇒ Learnee w a b → Learnee w' a' b' → Learnee (CombineResult w w') (a, a') (b, b')
-Learnee lws f ‖ Learnee rws g = Learnee ws h where
-	h ws' (x, y) = ((x', y'), up) where
-		(lws', rws') = uncombine (proxyOf (lws, rws)) ws'
+(‖) ∷ LearneeT w a b → LearneeT w' a' b' → LearneeT (Chain w w') (a, a') (b, b')
+LearneeT lws f ‖ LearneeT rws g = LearneeT (Chain (lws, rws)) h where
+	h (Chain (lws', rws')) (x, y) = ((x', y'), up) where
 		(x', f') = f lws' x
 		(y', g') = g rws' y
-		up (dx', dy') = ((dx, dy), combine lws'' rws'') where
+		up (dx', dy') = ((dx, dy), Chain (lws'', rws'')) where
 			(dx, lws'') = f' dx'
 			(dy, rws'') = g' dy'
-	ws = combine lws rws
 
-paired ∷ Combine w w' ⇒ Learnee w a b → Learnee w' a' b' → Learnee (CombineResult w w') (a, a') (b, b')
+paired ∷ LearneeT w a b → LearneeT w' a' b' → LearneeT (Chain w w') (a, a') (b, b')
 paired = (‖)
 
 cost ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a) → AD s (Forward a)) → Cost a
-cost fn x = diff' (fn (auto x))
+cost fn y' = diff' (fn (auto y'))
 
 squared ∷ Num a ⇒ Cost a
-squared = cost $ \x y → (x - y) ^ (2 ∷ Integer)
+squared = cost $ \y' y → (y - y') ^ (2 ∷ Integer)
 
-learnee ∷ Gradee (a, w) b → w → Learnee w a b
-learnee g ws = Learnee ws h where
+learneeT ∷ Gradee (a, w) b → w → LearneeT w a b
+learneeT g ws = LearneeT ws h where
 	h ws' x = (y, back) where
 		y = view (runGradee g) (x, ws')
 		back dy = set (runGradee g) dy (x, ws')
 
-computee ∷ Gradee a b → Computee a b
-computee g = Learnee () h where
+learnee ∷ Parametric w ⇒ Gradee (a, w) b → w → Learnee a b
+learnee g ws = toLearnee $ learneeT g ws
+
+computeeT ∷ Gradee a b → LearneeT NoParams a b
+computeeT g = LearneeT NoParams h where
 	h _ x = (y, back) where
 		y = view (runGradee g) x
-		back dy = (set (runGradee g) dy x, ())
+		back dy = (set (runGradee g) dy x, NoParams)
 
-learnPass ∷ Learnee w a b → Cost b → a → b → (w, b)
-learnPass (Learnee ws f) c x y' = (dws, e) where
+computee ∷ Gradee a b → Learnee a b
+computee g = toLearnee $ computeeT g
+
+makeBatches ∷ Int → [a] → [[a]]
+makeBatches sz = takeWhile (not ∘ null) ∘ unfoldr (Just ∘ splitAt sz)
+
+shuffleList ∷ MonadRandom m ⇒ [a] → m [a]
+shuffleList ls = runRVar (shuffle ls) StdRandom
+
+miss ∷ Learnee a b → Cost b → Example a b → b
+miss l c (x, y') = withLearnee l miss' where
+	miss' lt = snd $ learnPass lt c (x, y')
+
+avg ∷ Fractional a ⇒ [a] → a
+avg ls = sum ls / fromIntegral (length ls)
+
+runLearnT ∷ Learnee a b → StateT (Learnee a b) m c → m (c, Learnee a b)
+runLearnT = flip runStateT
+
+runLearn ∷ Learnee a b → State (Learnee a b) c → (c, Learnee a b)
+runLearn = flip runState
+
+learnPass ∷ LearneeT w a b → Cost b → Example a b → (w, b)
+learnPass (LearneeT ws f) c (x, y') = (dws, e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
 	(_, dws) = back de
 
-trainOnce ∷ Params w ⇒ Learnee w a b → Cost b → a → b → (Learnee w a b, b)
-trainOnce l c x y' = (over params (plusP dw) l, e) where
-	(dw, e) = learnPass l c x y'
+trainOnce ∷ MonadState (Learnee a b) m ⇒ Rational → Cost b → Example a b → m b
+trainOnce λ c (x, y') = state $ \l → withLearnee l train' where
+	train' lt = (e, toLearnee $ over params (subtract (fromRational λ * dw)) lt) where
+		(dw, e) = learnPass lt c (x, y')
 
-trainBatch ∷ (Params w, Fractional b) ⇒ Learnee w a b → Cost b → [(a, b)] → (Learnee w a b, b)
-trainBatch l c xs = (over params (plusP dw) l, e) where
-	(dw, e) = (sumP *** avg) ∘ unzip ∘ map (uncurry (learnPass l c)) $ xs
-	avg ls = sum ls / fromIntegral (length ls)
+trainBatch ∷ (MonadState (Learnee a b) m, Fractional b) ⇒ Rational → Cost b → [Example a b] → m b
+trainBatch λ c xs = state $ \l → withLearnee l train' where
+	train' lt = (e, toLearnee $ over params (subtract (fromRational λ * dw)) lt) where
+		(dw, e) = (sum *** avg) ∘ unzip ∘ map (learnPass lt c) $ xs
 
-trainEpoch ∷ (Params w, Fractional b) ⇒ Learnee w a b → Cost b → [[(a, b)]] → (Learnee w a b, b)
-trainEpoch l c = foldr (\xs (l', _) → trainBatch l' c xs) (l, 0)
+trainEpoch ∷ (MonadState (Learnee a b) m, Fractional b) ⇒ Rational → Cost b → [[Example a b]] → m b
+trainEpoch λ c = liftM (avg ∘ concat) ∘ mapM (\xs → liftM (replicate (length xs)) (trainBatch λ c xs))
 
-trainUntil ∷ (MonadRandom m, Params w, Fractional b, Ord b) ⇒ Int → Int → b → Learnee w a b → Cost b → [(a, b)] → m (Learnee w a b)
-trainUntil 0 _ _ l _ _ = return l
-trainUntil epochs batch eps l c xs
-	| e < eps = return l'
-	| otherwise = do
-		xs' ← runRVar (shuffle xs) StdRandom
-		trainUntil (pred epochs) batch eps l' c xs'
+instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
+	getRandomPrim = lift ∘ getRandomPrim
+
+instance MonadRandom m ⇒ MonadRandom (StateT s m) where
+	getRandomPrim = lift ∘ getRandomPrim
+
+trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, Fractional b, Ord b) ⇒ Rational → Int → Int → b → Cost b → [Example a b] → m b
+trainUntil λ epochs batch eps c xs = do
+	bs ← execWriterT $ train' epochs
+	return $ avg bs
 	where
-		(l', e) = trainEpoch l c bs
-		bs = unfoldr (Just ∘ splitAt batch) xs
-
-
-
-
-proxyOf ∷ a → Proxy a
-proxyOf _ = Proxy
+		train' 0 = return ()
+		train' n = do
+			xs' ← shuffleList xs
+			e ← trainEpoch λ c $ makeBatches batch xs'
+			tell [e]
+			unless (e < eps) $ train' (pred n)

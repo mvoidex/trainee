@@ -1,23 +1,21 @@
-{-# LANGUAGE RankNTypes, TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, DataKinds, KindSignatures, ScopedTypeVariables #-}
+{-# LANGUAGE GADTs, RankNTypes, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, KindSignatures, ScopedTypeVariables, ConstraintKinds, TemplateHaskell, GeneralizedNewtypeDeriving #-}
 
 module Numeric.Trainee.Types (
 	Gradee(..),
-	Ow(..),
-	Named(..), nameIt, unnameIt, name,
-	Learnee(..), params, learneePass, Computee,
+	Ow(..), NoParams(..), Chain(..), Named(..),
+	Parametric, LearneeT(..), params, pass, mapP, name, Learnee(..), withLearnee, withParams, toLearnee,
+	LookupParams(..),
 	Cost,
-	Params(..), sumP
+	Example
 	) where
 
 import Prelude hiding (id, (.))
 import Prelude.Unicode
 
+import Control.Applicative
 import qualified Control.Arrow as A (second)
 import Control.Category
 import Control.Lens
-import Data.Proxy
-import Data.Tagged
-import GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
 
 data Gradee a b = Gradee {
 	runGradee ∷ Lens' a b }
@@ -40,46 +38,116 @@ instance Ow Gradee where
 		g' (x, y) = (view f x, view g y)
 		s' (x, y) (x', y') = (set f x' x, set g y' y)
 
-newtype Named (s ∷ Symbol) w = Named (Tagged s w)
+data NoParams = NoParams deriving (Eq, Ord, Read, Show, Enum, Bounded)
 
-nameIt ∷ Proxy s → w → Named s w
-nameIt _ = Named ∘ Tagged
+instance Num NoParams where
+	_ + _ = NoParams
+	_ * _ = NoParams
+	abs _ = NoParams
+	signum _ = NoParams
+	fromInteger _ = NoParams
+	negate _ = NoParams
 
-unnameIt ∷ Named s w → w
-unnameIt (Named x) = untag x
+instance Fractional NoParams where
+	fromRational _ = NoParams
+	recip _ = NoParams
 
-instance (KnownSymbol s, Show w) ⇒ Show (Named s w) where
-	show (Named (Tagged v)) = unwords [symbolVal (Proxy ∷ Proxy s), show v]
+newtype Chain l r = Chain { getChain ∷ (l, r) } deriving (Eq, Ord, Read)
 
-data Learnee w a b = Learnee {
+instance (Show l, Show r) ⇒ Show (Chain l r) where
+	show (Chain (x, y)) = unlines [show x, " -- chain -- ", show y]
+
+instance (Num l, Num r) ⇒ Num (Chain l r) where
+	Chain (l, r) + Chain (l', r') = Chain (l + l', r + r')
+	Chain (l, r) * Chain (l', r') = Chain (l * l', r * r')
+	abs (Chain (l, r)) = Chain (abs l, abs r)
+	signum (Chain (l, r)) = Chain (signum l, signum r)
+	fromInteger i = Chain (fromInteger i, fromInteger i)
+	negate (Chain (l, r)) = Chain (negate l, negate r)
+
+instance (Fractional l, Fractional r) ⇒ Fractional (Chain l r) where
+	fromRational r = Chain (fromRational r, fromRational r)
+	recip (Chain (l, r)) = Chain (recip l, recip r)
+
+newtype Named a = Named { getNamed ∷ (String, a) } deriving (Eq, Ord, Read, Functor, Applicative)
+
+instance Show a ⇒ Show (Named a) where
+	show (Named (n, v)) = unlines ["name: " ++ n, show v]
+
+instance Num a ⇒ Num (Named a) where
+	(+) = liftA2 (+)
+	(*) = liftA2 (*)
+	abs = liftA abs
+	signum = liftA signum
+	fromInteger i = Named ("", fromInteger i)
+	negate = liftA negate
+
+instance Fractional a ⇒ Fractional (Named a) where
+	fromRational r = Named ("", fromRational r)
+	recip = liftA recip
+
+type Parametric w = (Read w, Show w, Num w, Fractional w, LookupParams w)
+
+class LookupParams a where
+	lookupParams ∷ String → a → (forall w . Parametric w ⇒ w → r) → r → r
+	traverseParams ∷ Traversal' a String
+
+instance LookupParams NoParams where
+	lookupParams _ _ _ act = act
+	traverseParams _ = pure
+
+instance Parametric a ⇒ LookupParams (Named a) where
+	lookupParams n (Named (n', v)) fn def
+		| n ≡ n' = fn v
+		| otherwise = def
+	traverseParams f (Named (n, v)) = Named <$> ((,) <$> f n <*> pure v)
+
+instance (Parametric a, Parametric b) ⇒ LookupParams (Chain a b) where
+	lookupParams n (Chain (x, y)) fn def = lookupParams n x fn (lookupParams n y fn def)
+	traverseParams f (Chain (x, y)) = Chain <$> ((,) <$> traverseParams f x <*> traverseParams f y)
+
+instance {-# OVERLAPPABLE #-} LookupParams a where
+	lookupParams _ _ _ def = def
+	traverseParams _ = pure
+
+data LearneeT w a b = LearneeT {
 	_params ∷ w,
-	_learneePass ∷ w → a → (b, b → (a, w)) }
+	_pass ∷ w → a → (b, b → (a, w)) }
 
-makeLenses ''Learnee
+makeLenses ''LearneeT
 
-name ∷ Proxy s → Learnee w a b → Learnee (Named s w) a b
-name p (Learnee ws f) = Learnee (nameIt p ws) f' where
-	f' ws' x = (x', A.second (nameIt p) ∘ back) where
-		(x', back) = f (unnameIt ws') x
+mapP ∷ Iso' w w' → LearneeT w a b → LearneeT w' a b
+mapP fn (LearneeT ws f) = LearneeT (view fn ws) f' where
+	f' ws' x = (y, A.second (view fn) ∘ back) where
+		(y, back) = f (view (from fn) ws') x
 
-type Computee a b = Learnee () a b
+name ∷ String → Learnee a b → Learnee a b
+name n l = withLearnee l $ \l' → toLearnee (mapP (iso setName dropName) l') where
+	setName ∷ w → Named w
+	setName w = Named (n, w)
+	dropName ∷ Named w → w
+	dropName (Named (_, w)) = w
+
+data Learnee a b where
+	Learnee ∷ Parametric w ⇒ w → (w → a → (b, b → (a, w))) → Learnee a b
+
+withLearnee ∷ Learnee a b → (forall w . Parametric w ⇒ LearneeT w a b → r) → r
+withLearnee (Learnee ws f) fn = fn (LearneeT ws f)
+
+withParams ∷ Learnee a b → (forall w .  Parametric w ⇒ w → r) → r
+withParams (Learnee ws _) fn = fn ws
+
+toLearnee ∷ Parametric w ⇒ LearneeT w a b → Learnee a b
+toLearnee (LearneeT ws f) = Learnee ws f
+
+instance LookupParams (Learnee a b) where
+	lookupParams n (Learnee ws _) = lookupParams n ws
+	traverseParams f (Learnee ws fn) = Learnee <$> traverseParams f ws <*> pure fn
+
+instance Parametric w ⇒ LookupParams (LearneeT w a b) where
+	lookupParams n (LearneeT ws _) = lookupParams n ws
+	traverseParams f (LearneeT ws fn) = LearneeT <$> traverseParams f ws <*> pure fn
 
 type Cost b = b → b → (b, b)
 
-class Params w where
-	plusP ∷ w → w → w
-
-instance {-# OVERLAPS #-} Params () where
-	plusP _ _ = ()
-
-instance Num w ⇒ Params w where
-	plusP = (+)
-
-instance {-# OVERLAPS #-} (Params w, Params w') ⇒ Params (w, w') where
-	plusP (l, l') (r, r') = (plusP l r, plusP l' r')
-
-instance Params w ⇒ Params (Named s w) where
-	plusP l r = nameIt (Proxy ∷ Proxy s) $ unnameIt l `plusP` unnameIt r
-
-sumP ∷ Params w ⇒ [w] → w
-sumP = foldr1 plusP
+type Example a b = (a, b)

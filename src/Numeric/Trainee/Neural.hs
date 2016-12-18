@@ -1,13 +1,14 @@
 {-# LANGUAGE GADTs, FlexibleContexts, RankNTypes #-}
 
 module Numeric.Trainee.Neural (
-	Layer, layerIn, layerOut,
-	NetBuild(..), Net(..),
+	LayerBuild(..),
+	Layer,
+	NetBuild(..), Net,
 	net, input, (⭃),
 	fc,
 
 	sigma, relu,
-	summator, activator,
+	summator, biaser, activator,
 	norm,
 
 	module Numeric.Trainee.Types,
@@ -23,43 +24,41 @@ import Data.Random
 import Numeric.LinearAlgebra
 
 import Numeric.Trainee.Types
-import Numeric.Trainee.Gradee (matVec, swap, unary, Unary)
+import Numeric.Trainee.Gradee (matVec, swap, odot, unary, Unary)
 import Numeric.Trainee.Learnee
 
-type Layer a = Learnee (Matrix a) (Vector a) (Vector a)
+data LayerBuild m a = LayerBuild {
+	layerOut ∷ Int,
+	layerBuild ∷ Int → m (Layer a) }
 
-layerIn ∷ (Container Vector a, Num a) ⇒ Layer a → Int
-layerIn = snd ∘ size ∘ _params
+type Layer a = Learnee (Vector a) (Vector a)
 
-layerOut ∷ (Container Vector a, Num a) ⇒ Layer a → Int
-layerOut = fst ∘ size ∘ _params
-
-data NetBuild w a = NetBuild {
+data NetBuild a = NetBuild {
 	buildOut ∷ Int,
-	buildNet ∷ Learnee w (Vector a) (Vector a) }
+	buildNet ∷ Learnee (Vector a) (Vector a) }
 
-data Net a where
-	Net ∷ (Show w, Params w) ⇒ Learnee w (Vector a) (Vector a) → Net a
+type Net a = Learnee (Vector a) (Vector a)
 
-net ∷ (Show w, Params w) ⇒ RVar (NetBuild w a) → IO (Net a)
-net act = liftM (Net ∘ buildNet) $ runRVar act StdRandom
+net ∷ RVar (NetBuild a) → IO (Net a)
+net act = liftM buildNet $ runRVar act StdRandom
 
-input ∷ Monad m ⇒ Int → m (NetBuild () a)
+input ∷ Monad m ⇒ Int → m (NetBuild a)
 input i = return $ NetBuild i (computee id)
 
-(⭃) ∷ (Combine w (Matrix a), Monad m, Num a, Container Vector a) ⇒ m (NetBuild w a) → (Int → m (Layer a)) → m (NetBuild (CombineResult w (Matrix a)) a)
+(⭃) ∷ Monad m ⇒ m (NetBuild a) → LayerBuild m a → m (NetBuild a)
 n ⭃ l = do
 	n' ← n
-	l' ← l (buildOut n')
+	l' ← layerBuild l (buildOut n')
 	return $ n' {
-		buildOut = layerOut l',
-		buildNet = buildNet n' ⇉ l' }
+		buildOut = layerOut l,
+		buildNet = buildNet n' ⥤ l' }
 
 -- | Fully connected layer
-fc ∷ (MonadRandom m, Distribution Normal a, Num (Vector a), Fractional a, Numeric a) ⇒ Unary (Vector a) → Int → Int → m (Layer a)
-fc f outputs inputs = do
+fc ∷ (MonadRandom m, Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → LayerBuild m a
+fc f outputs = LayerBuild outputs $ \inputs → do
 	s ← summator outputs inputs
-	return $ s ⇉ activator f
+	b ← biaser outputs
+	return $ s ⥤ b ⥤ activator f
 
 sigma ∷ Floating a ⇒ a → a
 sigma t = 1 / (1 + exp (negate t))
@@ -67,12 +66,17 @@ sigma t = 1 / (1 + exp (negate t))
 relu ∷ (Ord a, Num a) ⇒ a → a
 relu = max 0
 
-summator ∷ (MonadRandom m, Distribution Normal a, Fractional a, Numeric a) ⇒ Int → Int → m (Layer a)
+summator ∷ (MonadRandom m, Distribution Normal a, Fractional a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → Int → m (Layer a)
 summator outputs inputs = do
 	ws ← runRVar (replicateM (inputs * outputs) norm) StdRandom
-	return $ learnee (matVec . swap) ((inputs >< outputs) ws)
+	return $ learnee (matVec . swap) ((outputs >< inputs) ws)
 
-activator ∷ Num a ⇒ Unary a → Computee a a
+biaser ∷ (MonadRandom m, Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → m (Learnee (Vector a) (Vector a))
+biaser sz = do
+	bs ← runRVar (replicateM sz norm) StdRandom
+	return $ learnee odot (fromList bs)
+
+activator ∷ Num a ⇒ Unary a → Learnee a a
 activator f = computee (unary f)
 
 norm ∷ (Distribution Normal a, Fractional a) ⇒ RVar a
