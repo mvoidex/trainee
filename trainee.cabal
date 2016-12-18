@@ -45,6 +45,7 @@ test-suite test
   type: exitcode-stdio-1.0
   build-depends:
     base >= 4.9 && < 4.10,
+    aeson == 1.0.*,
     base-unicode-symbols == 0.2.*,
     containers == 0.5.*,
     hmatrix == 0.18.*,

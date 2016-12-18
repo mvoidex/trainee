@@ -27,7 +27,7 @@ gradee g s = Gradee $ lens g s
 
 -- | Make Gradee from any function
 ad ∷ (Traversable f, Num a) ⇒ (forall s . Reifies s Tape ⇒ f (Reverse s a) → Reverse s a) → Gradee (f a) a
-ad f = gradee f' (\x _ → grad f x) where
+ad f = gradee f' (\x dx → fmap (* dx) (grad f x)) where
 	f' = reify undefined (\p → primal ∘ spec p f ∘ fmap auto)
 	spec ∷ Reifies t Tape ⇒ proxy t → (forall s . Reifies s Tape ⇒ g (Reverse s a) → Reverse s a) → g (Reverse t a) → Reverse t a
 	spec _ h = h

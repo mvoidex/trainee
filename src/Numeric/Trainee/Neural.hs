@@ -16,7 +16,6 @@ module Numeric.Trainee.Neural (
 	) where
 
 import Prelude hiding ((.), id)
-import Prelude.Unicode
 
 import Control.Category
 import Control.Monad (replicateM, liftM)
@@ -51,14 +50,14 @@ n ⭃ l = do
 	l' ← layerBuild l (buildOut n')
 	return $ n' {
 		buildOut = layerOut l,
-		buildNet = buildNet n' ⥤ l' }
+		buildNet = buildNet n' ⇉ l' }
 
 -- | Fully connected layer
 fc ∷ (MonadRandom m, Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → LayerBuild m a
 fc f outputs = LayerBuild outputs $ \inputs → do
 	s ← summator outputs inputs
 	b ← biaser outputs
-	return $ s ⥤ b ⥤ activator f
+	return $ s ⇉ b ⇉ activator f
 
 sigma ∷ Floating a ⇒ a → a
 sigma t = 1 / (1 + exp (negate t))
@@ -69,15 +68,19 @@ relu = max 0
 summator ∷ (MonadRandom m, Distribution Normal a, Fractional a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → Int → m (Layer a)
 summator outputs inputs = do
 	ws ← runRVar (replicateM (inputs * outputs) norm) StdRandom
+	-- let
+	-- 	ws = repeat 0.5
 	return $ learnee (matVec . swap) ((outputs >< inputs) ws)
 
 biaser ∷ (MonadRandom m, Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → m (Learnee (Vector a) (Vector a))
 biaser sz = do
 	bs ← runRVar (replicateM sz norm) StdRandom
+	-- let
+	-- 	bs = replicate sz 0.5
 	return $ learnee odot (fromList bs)
 
 activator ∷ Num a ⇒ Unary a → Learnee a a
 activator f = computee (unary f)
 
 norm ∷ (Distribution Normal a, Fractional a) ⇒ RVar a
-norm = normal (-1.0) 1.0
+norm = normal (-0.25) 0.25
