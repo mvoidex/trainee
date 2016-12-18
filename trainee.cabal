@@ -51,6 +51,7 @@ test-suite test
     containers == 0.5.*,
     hmatrix == 0.18.*,
     lens == 4.*,
+    monad-loops == 0.4.*,
     mtl == 2.*,
     random-source == 0.3.*,
     trainee
