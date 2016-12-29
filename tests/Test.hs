@@ -5,10 +5,10 @@ module Main (
 
 import Prelude.Unicode
 
-import Control.Concurrent
 import Control.Monad
 import Control.Monad.Loops
 import Control.Monad.State
+import Test.Hspec
 
 import Numeric.Trainee.Neural
 import Numeric.LinearAlgebra
@@ -27,18 +27,17 @@ samples = [
 	vector [0, 1] ⇢ vector [1]]
 
 main ∷ IO ()
-main = do
-	n ← nnet
-	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 0.0001 squared samples
-	liftIO $ putStrLn $ "error: " ++ show e
-	liftIO $ putStrLn "result:"
-	liftIO $ forM_ samples $ \(x, _) →
-		putStrLn $ show x ++ " -> " ++ show (eval n' x)
+main = hspec $
+	describe "training neural network" $
+		it "should approximate xor function" $ do
+			n ← nnet
+			(e, _) ← runLearnT n $ trainUntil 1.0 10000 4 0.0001 squared samples
+			e `shouldSatisfy` (≤ 0.0001)
 
 trainUntil' ∷ Rational → Int → Vector Double → Cost (Vector Double) → [Sample (Vector Double) (Vector Double)] → Net Double → IO (Net Double)
-trainUntil' λ batch eps c xs n = liftM snd $ runLearnT n $ iterateUntil (< eps) $ do
+trainUntil' λ batch eps c xs n = fmap snd $ runLearnT n $ iterateUntil (< eps) $ do
 	xs' ← shuffleList xs
-	e ← liftM avg $ replicateM 10 $ trainEpoch λ c $ makeBatches batch xs'
+	e ← fmap avg $ replicateM 10 $ trainEpoch λ c $ makeBatches batch xs'
 	liftIO $ print e
 	return e
 

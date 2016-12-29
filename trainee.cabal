@@ -50,6 +50,7 @@ test-suite test
     base-unicode-symbols == 0.2.*,
     containers == 0.5.*,
     hmatrix == 0.18.*,
+    hspec == 2.*,
     lens == 4.*,
     monad-loops == 0.4.*,
     mtl == 2.*,
