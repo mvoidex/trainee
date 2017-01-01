@@ -1,0 +1,16 @@
+yellow,small,stretch,adult,t
+yellow,small,stretch,child,t
+yellow,small,dip,adult,t
+yellow,small,dip,child,t
+yellow,large,stretch,adult,t
+yellow,large,stretch,child,f
+yellow,large,dip,adult,f
+yellow,large,dip,child,f
+purple,small,stretch,adult,t
+purple,small,stretch,child,f
+purple,small,dip,adult,f
+purple,small,dip,child,f
+purple,large,stretch,adult,t
+purple,large,stretch,child,f
+purple,large,dip,adult,f
+purple,large,dip,child,f

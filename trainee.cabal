@@ -41,6 +41,8 @@ library
 
 test-suite test
   main-is: Test.hs
+  other-modules:
+    DataSet
   hs-source-dirs: tests
   ghc-options: -threaded -Wall -fno-warn-tabs
   type: exitcode-stdio-1.0
@@ -48,6 +50,8 @@ test-suite test
     base >= 4.9 && < 4.10,
     aeson == 1.0.*,
     base-unicode-symbols == 0.2.*,
+    bytestring == 0.10.*,
+    cassava == 0.4.*,
     containers == 0.5.*,
     hmatrix == 0.18.*,
     hspec == 2.*,
