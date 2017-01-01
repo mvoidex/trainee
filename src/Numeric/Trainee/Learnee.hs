@@ -84,8 +84,8 @@ shuffleList ∷ MonadRandom m ⇒ [a] → m [a]
 shuffleList ls = runRVar (shuffle ls) StdRandom
 
 miss ∷ Learnee a b → Cost b → Sample a b → b
-miss l c (x, y') = onLearnee miss' l where
-	miss' lt = snd $ learnPass lt c (x, y')
+miss l c s = onLearnee miss' l where
+	miss' lt = snd $ learnPass lt c s
 
 avg ∷ Fractional a ⇒ [a] → a
 avg ls = sum ls / fromIntegral (length ls)
@@ -97,15 +97,15 @@ runLearn ∷ Learnee a b → State (Learnee a b) c → (c, Learnee a b)
 runLearn = flip runState
 
 learnPass ∷ NFData w ⇒ LearneeT w a b → Cost b → Sample a b → (w, b)
-learnPass (LearneeT ws f) c (x, y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, e) where
+learnPass (LearneeT ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
 	(_, dws) = back de
 
 trainOnce ∷ MonadState (Learnee a b) m ⇒ Rational → Cost b → Sample a b → m b
-trainOnce λ c (x, y') = state $ onLearnee train' where
+trainOnce λ c s = state $ onLearnee train' where
 	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
-		(dw, e) = learnPass lt c (x, y')
+		(dw, e) = learnPass lt c s
 
 trainBatch ∷ (MonadState (Learnee a b) m, Fractional b) ⇒ Rational → Cost b → [Sample a b] → m b
 trainBatch λ c xs = state $ onLearnee train' where

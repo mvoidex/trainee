@@ -5,7 +5,7 @@ module Numeric.Trainee.Types (
 	Ow(..), NoParams(..), PairParams(..),
 	Parametric, LearneeT(..), params, forwardPass, Learnee(..), toLearnee, withLearnee, overLearnee, onLearnee,
 	Cost,
-	Sample
+	Sample(..), (⇢)
 	) where
 
 import Prelude hiding (id, (.))
@@ -117,4 +117,16 @@ onLearnee fn = fromLeft ∘ withLearnee (Left ∘ fn) where
 
 type Cost b = b → b → (b, b)
 
-type Sample a b = (a, b)
+data Sample a b = Sample {
+	sampleInput ∷ a,
+	sampleOutput ∷ b }
+		deriving (Eq, Ord)
+
+(⇢) ∷ a → b → Sample a b
+(⇢) = Sample
+
+instance Bifunctor Sample where
+	bimap f g (Sample x y) = Sample (f x) (g y)
+
+instance (Show a, Show b) ⇒ Show (Sample a b) where
+	show (Sample xs ys) = show xs ++ " => " ++ show ys
