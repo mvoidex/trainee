@@ -21,17 +21,18 @@ main = hspec $
 	describe "training neural network" $ do
 		it "should approximate xor function" testXor
 		it "should classify objects" testClassify
+		it "should support 3 classes" testIris
 
 testXor ∷ IO ()
 testXor = do
-	n ← nnet
+	n ← net (input 2 ⭃ fc sigma 2 ⭃ fc sigma 2 ⭃ fc sigma 1) ∷ IO (Net Double)
 	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared samples
 	e `shouldSatisfy` (≤ 1e-4)
 	mapM_ (shouldPass n' 0.1) samples
 
 testClassify ∷ IO ()
 testClassify = do
-	n ← classNet
+	n ← net (input 4 ⭃ fc sigma 4 ⭃ fc sigma 2 ⭃ fc sigma 1) ∷ IO (Net Double)
 	let
 		cases ∷ [(String, Vector Double → Vector Double)]
 		cases = [
@@ -48,8 +49,23 @@ testClassify = do
 		mapM_ (shouldPass n' 0.1) [xs ⇢ fun xs |
 			xs ← map vector (replicateM 4 [0.0, 1.0])]
 
-nnet ∷ IO (Net Double)
-nnet = net $ input 2 ⭃ fc sigma 2 ⭃ fc sigma 2 ⭃ fc sigma 1
+testIris ∷ IO ()
+testIris = do
+	n ← net (input 4 ⭃ fc sigma 4 ⭃ fc sigma 4 ⭃ fc sigma 3) ∷ IO (Net Double)
+	classes ← parseCsvFile "data/classify/iris/iris.data" (inputs ⇢ outs)
+	(e, n') ← runLearnT n $ trainUntil 5.0 10000 10 1e-5 squared classes
+	e `shouldSatisfy` (≤ 1e-4)
+	mapM_ (shouldPass n' 0.1) classes
+	where
+		inputs ∷ [Attr String Double]
+		inputs = [
+			read_ `onAttr` scale 0.1,
+			read_ `onAttr` scale 0.1,
+			read_ `onAttr` scale 0.1,
+			read_ `onAttr` scale 0.1]
+		outs ∷ [Attr String Double]
+		outs = [class_ ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]]
+
 
 samples ∷ [Sample (Vector Double) (Vector Double)]
 samples = [
@@ -57,10 +73,6 @@ samples = [
 	[1, 1] ⇢ [0],
 	[1, 0] ⇢ [1],
 	[0, 1] ⇢ [1]]
-
-
-classNet ∷ IO (Net Double)
-classNet = net $ input 4 ⭃ fc sigma 4 ⭃ fc sigma 2 ⭃ fc sigma 1
 
 readBalloonSamples ∷ FilePath → IO [Sample (Vector Double) (Vector Double)]
 readBalloonSamples fpath = parseCsvFile fpath (inputs ⇢ [bool]) where

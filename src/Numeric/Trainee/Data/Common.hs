@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Numeric.Trainee.Data.Common (
-	Attr, appAttrs, val, read_, enum_, class_
+	Attr, appAttrs, onAttr, val, read_, enum_, class_
 	) where
 
 import Prelude.Unicode
@@ -16,10 +16,13 @@ type Attr a b = a → Either String (Vector b)
 appAttrs ∷ Container Vector b ⇒ [Attr a b] → [a] → Either String (Vector b)
 appAttrs as xs = vjoin <$> zipWithM ($) as xs
 
+onAttr ∷ Attr a b → (Vector b → Vector b) → Attr a b
+onAttr a fn = fmap fn ∘ a
+
 val ∷ Container Vector a ⇒ Attr a a
 val = return ∘ fromList ∘ return
-read_ ∷ (Read a, Container Vector a) ⇒ Attr String a
 
+read_ ∷ (Read a, Container Vector a) ⇒ Attr String a
 read_ s = case readMaybe s of
 	Nothing → Left $ "error parsing value: " ++ s
 	Just v → val v
