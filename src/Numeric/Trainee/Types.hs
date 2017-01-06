@@ -83,7 +83,7 @@ type Parametric w = (Read w, Show w, Num w, Fractional w, NFData w)
 
 data LearneeT w a b = LearneeT {
 	_params ∷ w,
-	_forwardPass ∷ w → a → (b, b → (a, w)) }
+	_forwardPass ∷ w → a → (b, b → (w, a)) }
 
 makeLenses ''LearneeT
 
@@ -94,7 +94,7 @@ instance Show w ⇒ Show (LearneeT w a b) where
 	show (LearneeT ws _) = show ws
 
 data Learnee a b where
-	Learnee ∷ Parametric w ⇒ w → (w → a → (b, b → (a, w))) → Learnee a b
+	Learnee ∷ Parametric w ⇒ w → (w → a → (b, b → (w, a))) → Learnee a b
 
 toLearnee ∷ Parametric w ⇒ LearneeT w a b → Learnee a b
 toLearnee (LearneeT ws fn) = Learnee ws fn

@@ -6,7 +6,12 @@ module Numeric.Trainee.Gradee (
 	unary, binary,
 	dup, conjoin, swap,
 
-	matMat, matVec, odot
+	matMat, matVec, odot,
+	corrVec, corrMat,
+	flattenMat, reshapeVec,
+	transposeMat,
+	vecRow, vecCol,
+	biasVec, biasMat
 	) where
 
 import Prelude hiding (id, (.))
@@ -24,6 +29,10 @@ import Numeric.Trainee.Types
 -- | Make Gradee like lens
 gradee ∷ (a → b) → (a → b → a) → Gradee a b
 gradee g s = Gradee $ lens g s
+
+-- | Make like lens from binary op
+gradee2 ∷ (a → b → c) → (a → b → c → (a, b)) → Gradee (a, b) c
+gradee2 g s = gradee (uncurry g) (uncurry s)
 
 -- | Make Gradee from any function
 ad ∷ (Traversable f, Num a) ⇒ (forall s . Reifies s Tape ⇒ f (Reverse s a) → Reverse s a) → Gradee (f a) a
@@ -56,13 +65,45 @@ swap ∷ Gradee (a, b) (b, a)
 swap = gradee (\(x, y) → (y, x)) (\_ (dy, dx) → (dx, dy))
 
 matMat ∷ Numeric a ⇒ Gradee (Matrix a, Matrix a) (Matrix a)
-matMat = gradee (uncurry (<>)) backprop where
-	backprop (a, b) dc = (dc <> tr b, tr a <> dc)
+matMat = gradee2 (<>) backprop where
+	backprop a b dc = (dc <> tr b, tr a <> dc)
 
 matVec ∷ Numeric a ⇒ Gradee (Matrix a, Vector a) (Vector a)
-matVec = gradee (uncurry (#>)) backprop where
-	backprop (a, b) dc = (outer dc b, tr a #> dc)
+matVec = gradee2 (#>) backprop where
+	backprop a b dc = (outer dc b, tr a #> dc)
 
 odot ∷ Num (Vector a) ⇒ Gradee (Vector a, Vector a) (Vector a)
-odot = gradee (uncurry (+)) backprop where
-	backprop _ dc = (dc, dc)
+odot = gradee2 (+) backprop where
+	backprop _ _ dc = (dc, dc)
+
+corrVec ∷ Numeric a ⇒ Gradee (Vector a, Vector a) (Vector a)
+corrVec = gradee2 corr backprop where
+	backprop a b dc = (corr dc b, conv a dc)
+
+corrMat ∷ (Numeric a, Num (Vector a)) ⇒ Gradee (Matrix a, Matrix a) (Matrix a)
+corrMat = gradee2 corr2 backprop where
+	backprop a b dc = (corr2 dc b, conv2 a dc)
+
+flattenMat ∷ Numeric a ⇒ Gradee (Matrix a) (Vector a)
+flattenMat = gradee flatten backprop where
+	backprop a = reshape (cols a)
+
+reshapeVec ∷ Numeric a ⇒ Int → Gradee (Vector a) (Matrix a)
+reshapeVec cols' = gradee (reshape cols') (const flatten)
+
+transposeMat ∷ Numeric a ⇒ Gradee (Matrix a) (Matrix a)
+transposeMat = gradee tr (const tr)
+
+vecRow ∷ Numeric a ⇒ Gradee (Vector a) (Matrix a)
+vecRow = gradee asRow (const flatten)
+
+vecCol ∷ Numeric a ⇒ Gradee (Vector a) (Matrix a)
+vecCol = gradee asColumn (const flatten)
+
+biasVec ∷ Numeric a ⇒ Gradee (a, Vector a) (Vector a)
+biasVec = gradee2 (\b v → cmap (+ b) v) backprop where
+	backprop _ _ dv = (sumElements dv, dv)
+
+biasMat ∷ Numeric a ⇒ Gradee (a, Matrix a) (Matrix a)
+biasMat = gradee2 (\b m → cmap (+ b) m) backprop where
+	backprop _ _ dm = (sumElements dm, dm)

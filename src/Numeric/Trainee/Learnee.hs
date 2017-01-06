@@ -38,9 +38,9 @@ Learnee lws f ⇉ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (PairParam
 	h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
 		(y, f') = f lws' x
 		(z, g') = g rws' y
-		up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (dx, PairParams lws'' rws'') where
-			(dy, rws'') = g' dz
-			(dx, lws'') = f' dy
+		up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
+			(rws'', dy) = g' dz
+			(lws'', dx) = f' dy
 
 into ∷ Learnee a b → Learnee b c → Learnee a c
 into = (⇉)
@@ -50,9 +50,9 @@ Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (PairParam
 	h (PairParams lws' rws') (x, y) = x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
 		(x', f') = f lws' x
 		(y', g') = g rws' y
-		up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` ((dx, dy), PairParams lws'' rws'') where
-			(dx, lws'') = f' dx'
-			(dy, rws'') = g' dy'
+		up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', (dx, dy)) where
+			(lws'', dx) = f' dx'
+			(rws'', dy) = g' dy'
 
 paired ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 paired = (‖)
@@ -69,18 +69,18 @@ logLoss = cost $ \y' y → - (y' * log y)
 crossEntropy ∷ Floating a ⇒ Cost a
 crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
 
-learnee ∷ Parametric w ⇒ Gradee (a, w) b → w → Learnee a b
+learnee ∷ Parametric w ⇒ Gradee (w, a) b → w → Learnee a b
 learnee g ws = Learnee ws h where
 	h ws' x = x `seq` ws' `deepseq` y `seq` (y, back) where
-		y = view (runGradee g) (x, ws')
-		back dy = dy `seq` dx `seq` dws `deepseq` (dx, dws) where
-			(dx, dws) = set (runGradee g) dy (x, ws')
+		y = view (runGradee g) (ws', x)
+		back dy = dy `seq` dx `seq` dws `deepseq` (dws, dx) where
+			(dws, dx) = set (runGradee g) dy (ws', x)
 
 computee ∷ Gradee a b → Learnee a b
 computee g = Learnee NoParams h where
 	h _ x = x `seq` y `seq` (y, back) where
 		y = view (runGradee g) x
-		back dy = dy `seq` dx `seq` (dx, NoParams) where
+		back dy = dy `seq` dx `seq` (NoParams, dx) where
 			dx = set (runGradee g) dy x
 
 makeBatches ∷ Int → [a] → [[a]]
@@ -106,7 +106,7 @@ learnPass ∷ (NFData w, HasNorm b) ⇒ LearneeT w a b → Cost b → Sample a b
 learnPass (LearneeT ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, norm e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
-	(_, dws) = back de
+	(dws, _) = back de
 
 trainOnce ∷ (MonadState (Learnee a b) m, HasNorm b) ⇒ Rational → Cost b → Sample a b → m (Norm b)
 trainOnce λ c s = state $ onLearnee train' where
