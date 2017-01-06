@@ -1,17 +1,19 @@
-{-# LANGUAGE FlexibleContexts, OverloadedLists #-}
+{-# LANGUAGE FlexibleContexts, OverloadedLists, OverloadedStrings, UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Main (
 	main,
-	trainUntil', learnUnary, learnBinary
+	testXor, testClassify, testIris
 	) where
 
 import Prelude.Unicode
 
 import Control.Monad
-import Control.Monad.Loops
-import Control.Monad.State
+import Control.Monad.State.Strict
+import Control.Monad.Morph
 import Test.Hspec
 import Numeric.LinearAlgebra
+import Text.Format
 
 import Numeric.Trainee.Data
 import Numeric.Trainee.Neural
@@ -43,28 +45,46 @@ testClassify = do
 		fn ∷ ([Double] → Bool) → Vector Double → Vector Double
 		fn f = vector ∘ return ∘ fromIntegral ∘ fromEnum ∘ f ∘ toList
 	forM_ cases $ \(name, fun) → do
-		classes ← readBalloonSamples $ "data/classify/balloon/" ++ name ++ ".data"
+		classes ← readBalloonSamples $ "data/classify/balloon/{name}.data" ~~ ("name" ~% name)
 		(e, n') ← runLearnT n $ trainUntil 1.0 1000 10 1e-4 squared classes
 		e `shouldSatisfy` (≤ 1e-4)
 		mapM_ (shouldPass n' 0.1) [xs ⇢ fun xs |
 			xs ← map vector (replicateM 4 [0.0, 1.0])]
 
+
+instance Show (Vector a) ⇒ FormatBuild (Vector a)
+
+
 testIris ∷ IO ()
 testIris = do
-	n ← net (input 4 ⭃ fc sigma 4 ⭃ fc sigma 4 ⭃ fc sigma 3) ∷ IO (Net Double)
-	classes ← parseCsvFile "data/classify/iris/iris.data" (inputs ⇢ outs)
-	(e, n') ← runLearnT n $ trainUntil 5.0 10000 10 1e-5 squared classes
-	e `shouldSatisfy` (≤ 1e-4)
-	mapM_ (shouldPass n' 0.1) classes
+	n ← net (input 4 ⭃ fc sigma 12 ⭃ fc sigma 3) ∷ IO (Net Double)
+	classes ← readIrisData "data/classify/iris/iris.data"
+	(_, n') ← runLearnT n $ hoist (flip evalStateT (rightAnswers n classes, 0)) $ learnIris classes
+	let
+		failedSamples = filter ((> 0.2) ∘ miss n' crossEntropy ∘ snd) $ zip ([1..] ∷ [Integer]) classes
+	putStrLn "--- Done. ---"
+	putStrLn "Failed samples:"
+	forM_ failedSamples $ \(i, Sample inp outp) → putStrLn $ "{n}\t{input} → {output} ≢ {right}"
+		~~ ("n" ~% i)
+		~~ ("input" ~% inp)
+		~~ ("output" ~% eval n' inp)
+		~~ ("right" ~% outp)
+	length failedSamples `shouldSatisfy` (≤ 15)
 	where
-		inputs ∷ [Attr String Double]
-		inputs = [
-			read_ `onAttr` scale 0.1,
-			read_ `onAttr` scale 0.1,
-			read_ `onAttr` scale 0.1,
-			read_ `onAttr` scale 0.1]
-		outs ∷ [Attr String Double]
-		outs = [class_ ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]]
+		learnIris ∷ [Sample (Vector Double) (Vector Double)] → StateT (Net Double) (StateT (Int, Int) IO) ()
+		learnIris classes = do
+			e ← fmap last $ replicateM 100 $ trainEpoch 0.01 150 crossEntropy classes
+			n' ← get
+			let
+				ans = rightAnswers n' classes
+			lift $ modify (\(ans', long') → (ans, if ans ≡ ans' then succ long' else 0))
+			liftIO $ putStrLn $ "correct answers: {rights}/{total}; error = {e}"
+				~~ ("e" ~% e)
+				~~ ("rights" ~% ans)
+				~~ ("total" ~% length classes)
+			long' ← lift $ gets snd
+			when (long' ≤ 10 ∧ e > 0.1) $ learnIris classes
+		rightAnswers net_ samples_ = length $ filter (≤ 0.2) $ map (miss net_ crossEntropy) samples_
 
 
 samples ∷ [Sample (Vector Double) (Vector Double)]
@@ -73,6 +93,17 @@ samples = [
 	[1, 1] ⇢ [0],
 	[1, 0] ⇢ [1],
 	[0, 1] ⇢ [1]]
+
+readIrisData ∷ FilePath → IO [Sample (Vector Double) (Vector Double)]
+readIrisData fpath = parseCsvFile fpath (inputs ⇢ outs) where
+	inputs ∷ [Attr String Double]
+	inputs = [
+		read_ `onAttr` scale 0.1,
+		read_ `onAttr` scale 0.1,
+		read_ `onAttr` scale 0.1,
+		read_ `onAttr` scale 0.1]
+	outs ∷ [Attr String Double]
+	outs = [class_ ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]]
 
 readBalloonSamples ∷ FilePath → IO [Sample (Vector Double) (Vector Double)]
 readBalloonSamples fpath = parseCsvFile fpath (inputs ⇢ [bool]) where
@@ -89,30 +120,3 @@ shouldPass n ε (Sample xs ys) = when (err > ε) $ expectationFailure msg where
 	res = eval n xs
 	err = vecSize (res - ys)
 	vecSize v = sqrt (dot v v)
-
--- not used
-
-trainUntil' ∷ Rational → Int → Vector Double → Cost (Vector Double) → [Sample (Vector Double) (Vector Double)] → Net Double → IO (Net Double)
-trainUntil' λ batch eps c xs n = fmap snd $ runLearnT n $ iterateUntil (< eps) $ do
-	xs' ← shuffleList xs
-	e ← fmap avg $ replicateM 10 $ trainEpoch λ c $ makeBatches batch xs'
-	liftIO $ print e
-	return e
-
-learnUnary ∷ (Double → Double) → IO (Net Double)
-learnUnary fn = do
-	n ← net $ input 1 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 1
-	let
-		fn' v = vector [fn (v ! 0)]
-		args = map vector $ replicateM 1 [0.0, 0.1 .. 1.0]
-		smps = zipWith (⇢) args (map fn' args)
-	trainUntil' 1.0 10 1e-4 squared smps n
-
-learnBinary ∷ (Double → Double → Double) → IO (Net Double)
-learnBinary fn = do
-	n ← net $ input 2 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 5 ⭃ fc sigma 1
-	let
-		fn' v = vector [fn (v ! 0) (v ! 1)]
-		args = map vector $ replicateM 2 [0.0, 0.1 .. 1.0]
-		smps = zipWith (⇢) args (map fn' args)
-	trainUntil' 1.0 10 1e-4 squared smps n

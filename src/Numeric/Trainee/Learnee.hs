@@ -1,10 +1,10 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, FlexibleInstances, OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Numeric.Trainee.Learnee (
 	eval,
 	(⇉), (‖), into, paired,
-	cost, squared,
+	cost, squared, logLoss, crossEntropy,
 	learnee, computee,
 
 	makeBatches, shuffleList,
@@ -60,8 +60,14 @@ paired = (‖)
 cost ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a) → AD s (Forward a)) → Cost a
 cost fn y' = diff' (fn (auto y'))
 
-squared ∷ Num a ⇒ Cost a
-squared = cost $ \y' y → (y - y') ^ (2 ∷ Integer)
+squared ∷ Floating a ⇒ Cost a
+squared = cost $ \y' y → (y - y') ** 2
+
+logLoss ∷ Floating a ⇒ Cost a
+logLoss = cost $ \y' y → - (y' * log y)
+
+crossEntropy ∷ Floating a ⇒ Cost a
+crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
 
 learnee ∷ Parametric w ⇒ Gradee (a, w) b → w → Learnee a b
 learnee g ws = Learnee ws h where
@@ -83,7 +89,7 @@ makeBatches sz = takeWhile (not ∘ null) ∘ unfoldr (Just ∘ splitAt sz)
 shuffleList ∷ MonadRandom m ⇒ [a] → m [a]
 shuffleList ls = runRVar (shuffle ls) StdRandom
 
-miss ∷ Learnee a b → Cost b → Sample a b → b
+miss ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → Norm b
 miss l c s = onLearnee miss' l where
 	miss' lt = snd $ learnPass lt c s
 
@@ -96,24 +102,26 @@ runLearnT = flip runStateT
 runLearn ∷ Learnee a b → State (Learnee a b) c → (c, Learnee a b)
 runLearn = flip runState
 
-learnPass ∷ NFData w ⇒ LearneeT w a b → Cost b → Sample a b → (w, b)
-learnPass (LearneeT ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, e) where
+learnPass ∷ (NFData w, HasNorm b) ⇒ LearneeT w a b → Cost b → Sample a b → (w, Norm b)
+learnPass (LearneeT ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, norm e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
 	(_, dws) = back de
 
-trainOnce ∷ MonadState (Learnee a b) m ⇒ Rational → Cost b → Sample a b → m b
+trainOnce ∷ (MonadState (Learnee a b) m, HasNorm b) ⇒ Rational → Cost b → Sample a b → m (Norm b)
 trainOnce λ c s = state $ onLearnee train' where
 	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
 		(dw, e) = learnPass lt c s
 
-trainBatch ∷ (MonadState (Learnee a b) m, Fractional b) ⇒ Rational → Cost b → [Sample a b] → m b
+trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → [Sample a b] → m (Norm b)
 trainBatch λ c xs = state $ onLearnee train' where
 	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
 		(dw, e) = (sum *** avg) ∘ unzip ∘ map (learnPass lt c) $ xs
 
-trainEpoch ∷ (MonadState (Learnee a b) m, Fractional b) ⇒ Rational → Cost b → [[Sample a b]] → m b
-trainEpoch λ c = liftM (avg ∘ concat) ∘ mapM (\xs → liftM (replicate (length xs)) (trainBatch λ c xs))
+trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → [Sample a b] → m (Norm b)
+trainEpoch λ batch c xs = do
+	xs' ← shuffleList xs
+	fmap (avg ∘ concat) ∘ mapM (\bxs → fmap (replicate (length bxs)) (trainBatch λ c bxs)) $ makeBatches batch xs'
 
 instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
 	getRandomPrim = lift ∘ getRandomPrim
@@ -121,14 +129,13 @@ instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
 instance MonadRandom m ⇒ MonadRandom (StateT s m) where
 	getRandomPrim = lift ∘ getRandomPrim
 
-trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, Fractional b, Ord b) ⇒ Rational → Int → Int → b → Cost b → [Sample a b] → m b
+trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b), Ord (Norm b)) ⇒ Rational → Int → Int → Norm b → Cost b → [Sample a b] → m (Norm b)
 trainUntil λ epochs batch eps c xs = do
 	bs ← execWriterT $ train' epochs
 	return $ last bs
 	where
 		train' 0 = return ()
 		train' n = do
-			xs' ← shuffleList xs
-			e ← trainEpoch λ c $ makeBatches batch xs'
+			e ← trainEpoch λ batch c xs
 			tell [e]
 			unless (e < eps) $ train' (pred n)

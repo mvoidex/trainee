@@ -1,10 +1,10 @@
-{-# LANGUAGE GADTs, RankNTypes, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, KindSignatures, ScopedTypeVariables, ConstraintKinds, TemplateHaskell, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GADTs, RankNTypes, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, KindSignatures, ScopedTypeVariables, ConstraintKinds, TemplateHaskell, GeneralizedNewtypeDeriving, TypeFamilies #-}
 
 module Numeric.Trainee.Types (
 	Gradee(..),
 	Ow(..), NoParams(..), PairParams(..),
 	Parametric, LearneeT(..), params, forwardPass, Learnee(..), toLearnee, withLearnee, overLearnee, onLearnee,
-	Cost,
+	Cost, HasNorm(..),
 	Sample(..), (⇢)
 	) where
 
@@ -15,6 +15,7 @@ import Control.Category
 import Control.DeepSeq
 import Control.Lens
 import Data.List (intersperse, intercalate)
+import Numeric.LinearAlgebra (Normed(norm_1), R, Vector)
 
 data Gradee a b = Gradee {
 	runGradee ∷ Lens' a b }
@@ -116,6 +117,22 @@ onLearnee fn = fromLeft ∘ withLearnee (Left ∘ fn) where
 	fromLeft _ = error "onLearnee"
 
 type Cost b = b → b → (b, b)
+
+class HasNorm a where
+	type Norm a
+	norm ∷ a → Norm a
+
+instance HasNorm Float where
+	type Norm Float = Float
+	norm = id
+
+instance HasNorm Double where
+	type Norm Double = Double
+	norm = id
+
+instance Normed (Vector a) ⇒ HasNorm (Vector a) where
+	type Norm (Vector a) = R
+	norm = norm_1
 
 data Sample a b = Sample {
 	sampleInput ∷ a,
