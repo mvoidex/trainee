@@ -25,6 +25,7 @@ import Data.List (unfoldr)
 import Data.Random (runRVar, StdRandom(..), MonadRandom)
 import Data.Random.Internal.Source
 import Data.Random.List (shuffle)
+import qualified Data.Vector as V
 import Numeric.AD (AD)
 import Numeric.AD.Mode.Forward (Forward, auto, diff')
 
@@ -93,7 +94,7 @@ miss ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → Norm b
 miss l c s = onLearnee miss' l where
 	miss' lt = snd $ learnPass lt c s
 
-avg ∷ Fractional a ⇒ [a] → a
+avg ∷ (Foldable t, Fractional a) ⇒ t a → a
 avg ls = sum ls / fromIntegral (length ls)
 
 runLearnT ∷ Learnee a b → StateT (Learnee a b) m c → m (c, Learnee a b)
@@ -113,15 +114,17 @@ trainOnce λ c s = state $ onLearnee train' where
 	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
 		(dw, e) = learnPass lt c s
 
-trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → [Sample a b] → m (Norm b)
+trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → Samples a b → m (Norm b)
 trainBatch λ c xs = state $ onLearnee train' where
 	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
-		(dw, e) = (sum *** avg) ∘ unzip ∘ map (learnPass lt c) $ xs
+		(dw, e) = (V.sum *** avg) ∘ V.unzip ∘ V.map (learnPass lt c) $ xs
 
-trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → [Sample a b] → m (Norm b)
+trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → Samples a b → m (Norm b)
 trainEpoch λ batch c xs = do
-	xs' ← shuffleList xs
-	fmap (avg ∘ concat) ∘ mapM (\bxs → fmap (replicate (length bxs)) (trainBatch λ c bxs)) $ makeBatches batch xs'
+	ix' ← shuffleList [0 .. V.length xs - 1]
+	fmap (avg ∘ concat) ∘ mapM (\ixs → fmap (replicate (length ixs)) (trainBatch λ c (samples' ixs xs))) $ makeBatches batch ix'
+	where
+		samples' is vs = samples $ map (vs V.!) is
 
 instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
 	getRandomPrim = lift ∘ getRandomPrim
@@ -129,7 +132,7 @@ instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
 instance MonadRandom m ⇒ MonadRandom (StateT s m) where
 	getRandomPrim = lift ∘ getRandomPrim
 
-trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b), Ord (Norm b)) ⇒ Rational → Int → Int → Norm b → Cost b → [Sample a b] → m (Norm b)
+trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b), Ord (Norm b)) ⇒ Rational → Int → Int → Norm b → Cost b → Samples a b → m (Norm b)
 trainUntil λ epochs batch eps c xs = do
 	bs ← execWriterT $ train' epochs
 	return $ last bs

@@ -5,7 +5,8 @@ module Numeric.Trainee.Types (
 	Ow(..), NoParams(..), PairParams(..),
 	Parametric, LearneeT(..), params, forwardPass, Learnee(..), toLearnee, withLearnee, overLearnee, onLearnee,
 	Cost, HasNorm(..),
-	Sample(..), (⇢)
+	Sample(..), (⇢),
+	Samples, samples
 	) where
 
 import Prelude hiding (id, (.))
@@ -15,6 +16,7 @@ import Control.Category
 import Control.DeepSeq
 import Control.Lens
 import Data.List (intersperse, intercalate)
+import qualified Data.Vector as V
 import Numeric.LinearAlgebra (Normed(norm_1), R, Vector)
 
 data Gradee a b = Gradee {
@@ -147,3 +149,11 @@ instance Bifunctor Sample where
 
 instance (Show a, Show b) ⇒ Show (Sample a b) where
 	show (Sample xs ys) = show xs ++ " => " ++ show ys
+
+instance (NFData a, NFData b) ⇒ NFData (Sample a b) where
+	rnf (Sample i o) = rnf i `seq` rnf o
+
+type Samples a b = V.Vector (Sample a b)
+
+samples ∷ [Sample a b] → Samples a b
+samples = V.fromList

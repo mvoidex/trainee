@@ -1,38 +1,45 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Numeric.Trainee.Data.Common (
-	Attr, appAttrs, onAttr, val, read_, enum_, class_
+	CsvM, runCsvM, col_, read_, single_, enum_, class_, sample_
 	) where
 
 import Prelude.Unicode
 
-import Control.Monad
+import Control.DeepSeq
+import Control.Monad.Except
+import Control.Monad.Reader
 import Data.List
+import qualified Data.Vector as V
+import qualified Data.Text as T
 import Numeric.LinearAlgebra
-import Text.Read (readMaybe)
+import Text.Read
 
-type Attr a b = a → Either String (Vector b)
+import Numeric.Trainee.Types
 
-appAttrs ∷ Container Vector b ⇒ [Attr a b] → [a] → Either String (Vector b)
-appAttrs as xs = vjoin <$> zipWithM ($) as xs
+type CsvM a = ReaderT (V.Vector T.Text) (Either String) a
 
-onAttr ∷ Attr a b → (Vector b → Vector b) → Attr a b
-onAttr a fn = fmap fn ∘ a
+runCsvM ∷ CsvM a → V.Vector T.Text → Either String a
+runCsvM = runReaderT
 
-val ∷ Container Vector a ⇒ Attr a a
-val = return ∘ fromList ∘ return
+col_ ∷ Int → CsvM String
+col_ idx = ReaderT $ \r → maybe (throwError $ "invalid column index: " ++ show idx) (return ∘ T.unpack) (r V.!? idx)
 
-read_ ∷ (Read a, Container Vector a) ⇒ Attr String a
-read_ s = case readMaybe s of
-	Nothing → Left $ "error parsing value: " ++ s
-	Just v → val v
+read_ ∷ Read a ⇒ String → CsvM a
+read_ s = maybe (throwError $ "can't parse: " ++ s) return ∘ readMaybe $ s
 
-enum_ ∷ (Fractional a, Container Vector a) ⇒ [String] → Attr String a
+single_ ∷ a → CsvM [a]
+single_ = return ∘ return
+
+enum_ ∷ Fractional a ⇒ [String] → String → CsvM a
 enum_ names name = case findIndex (≡ name) names of
-	Nothing → Left $ "invalid enum value: " ++ name ++ ", expected " ++ intercalate ", " names
-	Just idx → val $ fromIntegral idx / fromIntegral (length names - 1)
+	Nothing → throwError $ "invalid enum value: " ++ name ++ ", expected " ++ intercalate ", " names
+	Just idx → return (fromIntegral idx / fromIntegral (length names - 1))
 
-class_ ∷ (Num a, Container Vector a) ⇒ [String] → Attr String a
+class_ ∷ Num a ⇒ [String] → String → CsvM [a]
 class_ names name = case findIndex (≡ name) names of
-	Nothing → Left $ "invalid class value: " ++ name ++ ", expected " ++ intercalate ", " names
-	Just idx → return $ assoc (length names) 0 [(idx, 1)]
+	Nothing → throwError $ "invalid class value: " ++ name ++ ", expected " ++ intercalate ", " names
+	Just idx → return $ replicate idx 0 ++ [1] ++ replicate (length names - idx - 1) 0
+
+sample_ ∷ Container Vector a ⇒ [a] → [a] → CsvM (Sample (Vector a) (Vector a))
+sample_ is os = return $!! Sample (fromList is) (fromList os)

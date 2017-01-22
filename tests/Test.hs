@@ -3,16 +3,20 @@
 
 module Main (
 	main,
-	testXor, testClassify, testIris
+	testXor, testClassify, testIris, testMnist
 	) where
 
 import Prelude.Unicode
 
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.State.Strict
 import Control.Monad.Morph
+import qualified Data.Attoparsec.Text as A
+import qualified Data.Text.IO as T
+import qualified Data.Vector as V
 import Test.Hspec
-import Numeric.LinearAlgebra
+import Numeric.LinearAlgebra hiding (conv2, conv)
 import Text.Format
 
 import Numeric.Trainee.Data
@@ -28,9 +32,9 @@ main = hspec $
 testXor ∷ IO ()
 testXor = do
 	n ← net (input 2 ⭃ fc sigma 2 ⭃ fc sigma 2 ⭃ fc sigma 1) ∷ IO (Net Double)
-	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared samples
+	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared xorSamples
 	e `shouldSatisfy` (≤ 1e-4)
-	mapM_ (shouldPass n' 0.1) samples
+	mapM_ (shouldPass n' 0.1) xorSamples
 
 testClassify ∷ IO ()
 testClassify = do
@@ -59,9 +63,9 @@ testIris ∷ IO ()
 testIris = do
 	n ← net (input 4 ⭃ fc sigma 12 ⭃ fc sigma 3) ∷ IO (Net Double)
 	classes ← readIrisData "data/classify/iris/iris.data"
-	(_, n') ← runLearnT n $ hoist (flip evalStateT (rightAnswers n classes, 0)) $ learnIris classes
+	(_, n') ← runLearnT n $ hoist (`evalStateT` (rightAnswers n classes, 0)) $ learnIris classes
 	let
-		failedSamples = filter ((> 0.2) ∘ miss n' crossEntropy ∘ snd) $ zip ([1..] ∷ [Integer]) classes
+		failedSamples = V.filter (not ∘ rightClass n' ∘ snd) $ V.zip (V.fromList ([1..] ∷ [Integer])) classes
 	putStrLn "--- Done. ---"
 	putStrLn "Failed samples:"
 	forM_ failedSamples $ \(i, Sample inp outp) → putStrLn $ "{n}\t{input} → {output} ≢ {right}"
@@ -71,7 +75,7 @@ testIris = do
 		~~ ("right" ~% outp)
 	length failedSamples `shouldSatisfy` (≤ 15)
 	where
-		learnIris ∷ [Sample (Vector Double) (Vector Double)] → StateT (Net Double) (StateT (Int, Int) IO) ()
+		learnIris ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) (StateT (Int, Int) IO) ()
 		learnIris classes = do
 			e ← fmap last $ replicateM 100 $ trainEpoch 0.01 150 crossEntropy classes
 			n' ← get
@@ -84,35 +88,77 @@ testIris = do
 				~~ ("total" ~% length classes)
 			long' ← lift $ gets snd
 			when (long' ≤ 10 ∧ e > 0.1) $ learnIris classes
-		rightAnswers net_ samples_ = length $ filter (≤ 0.2) $ map (miss net_ crossEntropy) samples_
 
 
-samples ∷ [Sample (Vector Double) (Vector Double)]
-samples = [
+testMnist ∷ IO ()
+testMnist = do
+	n ← net (input 784 ⭃ conv2 sigma 28 (3, 3) ⭃ conv2 sigma 26 (3, 3) ⭃ fc sigma 32 ⭃ fc sigma 10)
+	putStrLn "reading train data"
+	smps ← readMnist "data/classify/mnist/train.csv"
+	putStrLn $ "loaded {0} samples" ~~ length smps
+	(_, n') ← runLearnT n $ learnMnist smps
+	print n'
+	where
+		learnMnist ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) IO ()
+		learnMnist smps = do
+			let
+				ixs = takeWhile (< V.length smps) $ map (* 20) [0 .. ]
+				bs = map (\ix → V.slice ix (min 20 (V.length smps - ix)) smps) ixs
+			liftIO $ putStrLn $ "prepared {0} batches" ~~ length bs
+			es ← forM bs $ \b → do
+				e ← trainBatch 0.01 crossEntropy b
+				liftIO $ putStrLn $ "batch error: {e}" ~~ ("e" ~% e)
+				return e
+			let
+				e = avg es
+			liftIO $ putStrLn $ "error: {e}" ~~ ("e" ~% e)
+			when (e > 0.1) $ learnMnist smps
+
+
+rightClass ∷ Net Double → Sample (Vector Double) (Vector Double) → Bool
+rightClass n_ (Sample i o) = maxIndex (eval n_ i) ≡ maxIndex o
+
+rightAnswers ∷ Net Double → Samples (Vector Double) (Vector Double) → Int
+rightAnswers n_ = V.length ∘ V.filter (rightClass n_)
+
+
+xorSamples ∷ Samples (Vector Double) (Vector Double)
+xorSamples = samples [
 	[0, 0] ⇢ [0],
 	[1, 1] ⇢ [0],
 	[1, 0] ⇢ [1],
 	[0, 1] ⇢ [1]]
 
-readIrisData ∷ FilePath → IO [Sample (Vector Double) (Vector Double)]
-readIrisData fpath = parseCsvFile fpath (inputs ⇢ outs) where
-	inputs ∷ [Attr String Double]
-	inputs = [
-		read_ `onAttr` scale 0.1,
-		read_ `onAttr` scale 0.1,
-		read_ `onAttr` scale 0.1,
-		read_ `onAttr` scale 0.1]
-	outs ∷ [Attr String Double]
-	outs = [class_ ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]]
+readIrisData ∷ FilePath → IO (Samples (Vector Double) (Vector Double))
+readIrisData fpath = parseCsvFile False fpath $ do
+	is ← mapM (col_ >=> read_ >=> (return ∘ (* 0.1))) [0 .. 3]
+	os ← col_ 4 >>= class_ ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+	sample_ is os
 
-readBalloonSamples ∷ FilePath → IO [Sample (Vector Double) (Vector Double)]
-readBalloonSamples fpath = parseCsvFile fpath (inputs ⇢ [bool]) where
-	inputs = [
-		enum_ ["yellow", "purple"],
-		enum_ ["small", "large"],
-		enum_ ["stretch", "dip"],
-		enum_ ["adult", "child"]]
-	bool = enum_ ["f", "t"]
+readBalloonSamples ∷ FilePath → IO (Samples (Vector Double) (Vector Double))
+readBalloonSamples fpath = parseCsvFile False fpath $ do
+	is ← sequence [
+		col_ 0 >>= enum_ ["yellow", "purple"],
+		col_ 1 >>= enum_ ["small", "large"],
+		col_ 2 >>= enum_ ["stretch", "dip"],
+		col_ 3 >>= enum_ ["adult", "child"]]
+	os ← col_ 4 >>= enum_ ["f", "t"] >>= single_
+	sample_ is os
+
+readMnist ∷ FilePath → IO (Samples (Vector Double) (Vector Double))
+readMnist fpath = do
+	cts ← T.readFile fpath
+	either error return $ A.parseOnly mnist cts
+	where
+		mnist ∷ A.Parser (Samples (Vector Double) (Vector Double))
+		mnist = do
+			_ ← A.manyTill A.anyChar A.endOfLine
+			fmap samples $ A.many' $ do
+				(f:fs) ← A.sepBy A.decimal (A.char ',') <* A.endOfLine
+				let
+					is = fromList $ map ((/ 255.0) ∘ fromIntegral) fs
+					os = fromList $ replicate f 0.0 ++ [1.0] ++ replicate (10 - f - 1) 0.0
+				is `deepseq` os `deepseq` return (Sample is os)
 
 shouldPass ∷ Net Double → Double → Sample (Vector Double) (Vector Double) → IO ()
 shouldPass n ε (Sample xs ys) = when (err > ε) $ expectationFailure msg where
