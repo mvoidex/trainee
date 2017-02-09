@@ -21,6 +21,7 @@ import Text.Format
 
 import Numeric.Trainee.Data
 import Numeric.Trainee.Neural
+import Numeric.Trainee.Gradee (reshapeVec, flattenMat)
 
 main ∷ IO ()
 main = hspec $
@@ -31,14 +32,14 @@ main = hspec $
 
 testXor ∷ IO ()
 testXor = do
-	n ← net (input 2 ⭃ fc sigma 2 ⭃ fc sigma 2 ⭃ fc sigma 1) ∷ IO (Net Double)
+	n ← fc sigma 2 2 ⭃ fc sigma 2 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
 	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared xorSamples
 	e `shouldSatisfy` (≤ 1e-4)
 	mapM_ (shouldPass n' 0.1) xorSamples
 
 testClassify ∷ IO ()
 testClassify = do
-	n ← net (input 4 ⭃ fc sigma 4 ⭃ fc sigma 2 ⭃ fc sigma 1) ∷ IO (Net Double)
+	n ← fc sigma 4 4 ⭃ fc sigma 4 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
 	let
 		cases ∷ [(String, Vector Double → Vector Double)]
 		cases = [
@@ -61,7 +62,7 @@ instance Show (Vector a) ⇒ FormatBuild (Vector a)
 
 testIris ∷ IO ()
 testIris = do
-	n ← net (input 4 ⭃ fc sigma 12 ⭃ fc sigma 3) ∷ IO (Net Double)
+	n ← fc sigma 4 12 ⭃ fc sigma 12 3 ∷ IO (Net Double)
 	classes ← readIrisData "data/classify/iris/iris.data"
 	(_, n') ← runLearnT n $ hoist (`evalStateT` (rightAnswers n classes, 0)) $ learnIris classes
 	let
@@ -92,7 +93,14 @@ testIris = do
 
 testMnist ∷ IO ()
 testMnist = do
-	n ← net (input 784 ⭃ conv2 sigma 28 (3, 3) ⭃ conv2 sigma 26 (3, 3) ⭃ fc sigma 32 ⭃ fc sigma 10)
+	n ←
+		return (computee (reshapeVec 28)) ⭃
+		conv2 sigma (5, 5) ⭃
+		conv2 sigma (5, 5) ⭃
+		return (computee flattenMat) ⭃
+		fc sigma 400 32 ⭃
+		fc sigma 32 10
+		∷ IO (Net Double)
 	putStrLn "reading train data"
 	smps ← readMnist "data/classify/mnist/train.csv"
 	putStrLn $ "loaded {0} samples" ~~ length smps
