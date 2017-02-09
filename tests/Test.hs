@@ -109,17 +109,16 @@ testMnist = do
 	where
 		learnMnist ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) IO ()
 		learnMnist smps = do
-			let
-				ixs = takeWhile (< V.length smps) $ map (* 20) [0 .. ]
-				bs = map (\ix → V.slice ix (min 20 (V.length smps - ix)) smps) ixs
-			liftIO $ putStrLn $ "prepared {0} batches" ~~ length bs
-			es ← forM bs $ \b → do
+			ixs ← makeBatches 20 <$> shuffleList [0 .. V.length smps - 1]
+			es ← forM ixs $ \is → do
+				let
+					b = V.fromList $ map (smps V.!) is
 				e ← trainBatch 0.01 crossEntropy b
-				liftIO $ putStrLn $ "batch error: {e}" ~~ ("e" ~% e)
+				liftIO $ putStrLn $ "batch error: {}" ~~ e
 				return e
 			let
 				e = avg es
-			liftIO $ putStrLn $ "error: {e}" ~~ ("e" ~% e)
+			liftIO $ putStrLn $ "error: {}" ~~ e
 			when (e > 0.1) $ learnMnist smps
 
 
