@@ -5,7 +5,8 @@ module Numeric.Trainee.Gradee (
 	Unary, Binary,
 	unary, binary,
 	dup, vdup,
-	conjoin, vconjoin, swap,
+	conjoin, plus, vconjoin, vsum,
+	swap,
 
 	matMat, matVec, odot,
 	corrVec, corrMat,
@@ -66,8 +67,14 @@ vdup n = gradee (V.replicate n) (const V.sum)
 conjoin ∷ Num a ⇒ Gradee (a, a) a
 conjoin = binary (+)
 
+plus ∷ Num a ⇒ Gradee (a, a) a
+plus = conjoin
+
 vconjoin ∷ Num a ⇒ Gradee (V.Vector a) a
 vconjoin = ad V.sum
+
+vsum ∷ Num a ⇒ Gradee (V.Vector a) a
+vsum = vconjoin
 
 swap ∷ Gradee (a, b) (b, a)
 swap = gradee (\(x, y) → (y, x)) (\_ (dy, dx) → (dx, dy))

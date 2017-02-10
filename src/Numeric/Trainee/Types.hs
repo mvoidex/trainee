@@ -34,11 +34,16 @@ class Category a ⇒ Ow a where
 	second = stars id
 
 	stars ∷ a b c → a b' c' → a (b, b') (c, c')
+	vstars ∷ a b c → a (V.Vector b) (V.Vector c)
 
 instance Ow Gradee where
 	stars (Gradee f) (Gradee g) = Gradee $ lens g' s' where
 		g' (x, y) = (view f x, view g y)
 		s' (x, y) (x', y') = (set f x' x, set g y' y)
+
+	vstars (Gradee f) = Gradee $ lens g' s' where
+		g' = V.map (view f)
+		s' = V.zipWith (flip (set f))
 
 data NoParams = NoParams deriving (Eq, Ord, Read, Enum, Bounded)
 
@@ -80,6 +85,27 @@ instance (Num l, Num r) ⇒ Num (PairParams l r) where
 instance (Fractional l, Fractional r) ⇒ Fractional (PairParams l r) where
 	fromRational r = PairParams (fromRational r) (fromRational r)
 	recip (PairParams l r) = PairParams (recip l) (recip r)
+
+newtype VecParams a = VecParams (V.Vector a) deriving (Eq, Ord)
+
+instance NFData a ⇒ NFData (VecParams a) where
+	rnf (VecParams vs) = rnf vs
+
+instance Show a ⇒ Show (VecParams a) where
+	show (VecParams vs) = intercalate "\n" $ intersperse (replicate 10 '-') $
+		filter (not ∘ null) $ map show $ V.toList vs
+
+instance Num a ⇒ Num (VecParams a) where
+	VecParams l + VecParams r = VecParams $ V.zipWith (+) l r
+	VecParams l * VecParams r = VecParams $ V.zipWith (*) l r
+	abs (VecParams v) = VecParams $ V.map abs v
+	signum (VecParams v) = VecParams $ V.map signum v
+	fromInteger = VecParams ∘ V.singleton ∘ fromInteger
+	negate (VecParams v) = VecParams $ V.map negate v
+
+instance Fractional a ⇒ Fractional (VecParams a) where
+	fromRational = VecParams ∘ V.singleton ∘ fromRational
+	recip (VecParams v) = VecParams $ V.map recip v
 
 type Parametric w = (Read w, Show w, Num w, Fractional w, NFData w)
 
