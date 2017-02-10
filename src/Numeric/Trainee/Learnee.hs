@@ -16,7 +16,7 @@ module Numeric.Trainee.Learnee (
 
 import Prelude.Unicode
 
-import Control.Arrow ((***))
+import Control.Arrow ((***), (>>>))
 import Control.DeepSeq
 import Control.Lens
 import Control.Monad.State.Strict
@@ -35,16 +35,10 @@ eval ∷ Learnee a b → a → b
 eval (Learnee ws f) = fst ∘ f ws
 
 (⇉) ∷ Learnee a b → Learnee b c → Learnee a c
-Learnee lws f ⇉ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
-	h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
-		(y, f') = f lws' x
-		(z, g') = g rws' y
-		up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
-			(rws'', dy) = g' dz
-			(lws'', dx) = f' dy
+(⇉) = (>>>)
 
 into ∷ Learnee a b → Learnee b c → Learnee a c
-into = (⇉)
+into = (>>>)
 
 (‖) ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where

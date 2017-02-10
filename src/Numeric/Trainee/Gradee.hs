@@ -4,7 +4,8 @@ module Numeric.Trainee.Gradee (
 	Gradee(..), gradee, ad,
 	Unary, Binary,
 	unary, binary,
-	dup, conjoin, swap,
+	dup, vdup,
+	conjoin, vconjoin, swap,
 
 	matMat, matVec, odot,
 	corrVec, corrMat,
@@ -20,6 +21,7 @@ import Prelude.Unicode
 import Control.Category
 import Control.Lens (lens)
 import Data.Reflection (Reifies, reify)
+import qualified Data.Vector as V
 import Numeric.AD (grad, auto)
 import Numeric.AD.Internal.Reverse (Reverse, primal, Tape)
 import Numeric.LinearAlgebra
@@ -58,8 +60,14 @@ binary f = ad (\[x, y] → f x y) . gradee g s where
 dup ∷ Num a ⇒ Gradee a (a, a)
 dup = gradee (\x → (x, x)) (\_ (dx', dx'') → dx' + dx'')
 
+vdup ∷ Num a ⇒ Int → Gradee a (V.Vector a)
+vdup n = gradee (V.replicate n) (const V.sum)
+
 conjoin ∷ Num a ⇒ Gradee (a, a) a
 conjoin = binary (+)
+
+vconjoin ∷ Num a ⇒ Gradee (V.Vector a) a
+vconjoin = ad V.sum
 
 swap ∷ Gradee (a, b) (b, a)
 swap = gradee (\(x, y) → (y, x)) (\_ (dy, dx) → (dx, dy))

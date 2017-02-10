@@ -19,7 +19,7 @@ import Data.List (intersperse, intercalate)
 import qualified Data.Vector as V
 import Numeric.LinearAlgebra (Normed(norm_1), R, Vector)
 
-data Gradee a b = Gradee {
+newtype Gradee a b = Gradee {
 	runGradee ∷ Lens' a b }
 
 instance Category Gradee where
@@ -106,6 +106,17 @@ instance NFData (Learnee a b) where
 
 instance Show (Learnee a b) where
 	show (Learnee ws _) = show ws
+
+instance Category Learnee where
+	id = Learnee NoParams fn where
+		fn _ x = (x, const (NoParams, x))
+	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
+		h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
+			(y, f') = f lws' x
+			(z, g') = g rws' y
+			up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
+				(rws'', dy) = g' dz
+				(lws'', dx) = f' dy
 
 withLearnee ∷ Applicative f ⇒ (forall w . Parametric w ⇒ LearneeT w a b → f (LearneeT w a b)) → Learnee a b → f (Learnee a b)
 withLearnee act (Learnee ws fn) = toLearnee <$> act (LearneeT ws fn)
