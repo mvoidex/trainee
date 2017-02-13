@@ -84,7 +84,7 @@ instance Category Learnee where
 	id = Learnee (Params NoParams) fn where
 		fn _ x = (x, const (Params NoParams, x))
 	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
-		h ws x = case cast ws of
+		h (Params ws) x = case cast ws of
 			(Just (lws', rws')) → x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
 				(y, f') = f lws' x
 				(z, g') = g rws' y

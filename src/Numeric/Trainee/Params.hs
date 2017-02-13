@@ -31,11 +31,11 @@ instance Num Params where
 	(*) = liftParams2 (*)
 	abs = liftParams abs
 	signum = liftParams signum
-	fromInteger = const $ error "params: fromInteger"
+	fromInteger = Params ∘ (fromInteger ∷ Integer → Double)
 	negate = liftParams negate
 
 instance Fractional Params where
-	fromRational = const $ error "params: fromRational"
+	fromRational = Params ∘ (fromRational ∷ Rational → Double)
 	recip = liftParams recip
 
 instance NFData Params where
@@ -82,10 +82,16 @@ liftParams fn = onParams (Params ∘ fn)
 onParams2 ∷ (forall w . Parametric w ⇒ w → w → a) → Params → Params → a
 onParams2 fn (Params lws) (Params rws) = case eqT' lws rws of
 	Just Refl → fn lws rws
-	_ → error $ "params type mismatch: '" ++ typeName lws ++ "' and '" ++ typeName rws ++ "'"
+	_ → case (asDouble lws, asDouble rws) of
+		(Just _, Just _) → error "onParams2: impossible, inequal types, but both doubles"
+		(Just d, Nothing) → fn (fromRational (toRational d)) rws
+		(Nothing, Just d) → fn lws (fromRational (toRational d))
+		(Nothing, Nothing) → error $ "params type mismatch: '" ++ typeName lws ++ "' and '" ++ typeName rws ++ "'"
 	where
 		eqT' ∷ (Typeable u, Typeable v) ⇒ u → v → Maybe (u :~: v)
 		eqT' _ _ = eqT
+		asDouble ∷ Typeable a ⇒ a → Maybe Double
+		asDouble = cast
 		typeName ∷ Typeable a ⇒ a → String
 		typeName = show ∘ typeRep ∘ proxy'
 		proxy' ∷ a → Proxy a

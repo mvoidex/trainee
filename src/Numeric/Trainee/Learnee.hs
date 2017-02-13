@@ -43,7 +43,7 @@ into = (>>>)
 
 (‖) ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
-	h ws (x, y) = case cast ws of
+	h (Params ws) (x, y) = case cast ws of
 		(Just (lws', rws')) → x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
 			(x', f') = f lws' x
 			(y', g') = g rws' y
@@ -69,7 +69,7 @@ crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
 
 learnee ∷ Parametric w ⇒ Gradee (w, a) b → w → Learnee a b
 learnee g ws = Learnee (Params ws) h where
-	h ps x = case cast ps of
+	h (Params ps) x = case cast ps of
 		Just ws' → x `seq` ws' `deepseq` y `seq` (y, back) where
 			y = view (runGradee g) (ws', x)
 			back dy = dy `seq` dx `seq` dws `deepseq` (Params dws, dx) where
