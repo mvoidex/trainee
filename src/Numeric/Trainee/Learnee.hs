@@ -25,6 +25,7 @@ import Data.List (unfoldr)
 import Data.Random (runRVar, StdRandom(..), MonadRandom)
 import Data.Random.Internal.Source
 import Data.Random.List (shuffle)
+import Data.Typeable (cast)
 import qualified Data.Vector as V
 import Numeric.AD (AD)
 import Numeric.AD.Mode.Forward (Forward, auto, diff')
@@ -41,13 +42,15 @@ into ∷ Learnee a b → Learnee b c → Learnee a c
 into = (>>>)
 
 (‖) ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
-Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
-	h (PairParams lws' rws') (x, y) = x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
-		(x', f') = f lws' x
-		(y', g') = g rws' y
-		up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', (dx, dy)) where
-			(lws'', dx) = f' dx'
-			(rws'', dy) = g' dy'
+Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
+	h ws (x, y) = case cast ws of
+		(Just (lws', rws')) → x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
+			(x', f') = f lws' x
+			(y', g') = g rws' y
+			up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), (dx, dy)) where
+				(lws'', dx) = f' dx'
+				(rws'', dy) = g' dy'
+		_ → error "learnee: (||): impossible"
 
 paired ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 paired = (‖)
@@ -65,17 +68,19 @@ crossEntropy ∷ Floating a ⇒ Cost a
 crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
 
 learnee ∷ Parametric w ⇒ Gradee (w, a) b → w → Learnee a b
-learnee g ws = Learnee ws h where
-	h ws' x = x `seq` ws' `deepseq` y `seq` (y, back) where
-		y = view (runGradee g) (ws', x)
-		back dy = dy `seq` dx `seq` dws `deepseq` (dws, dx) where
-			(dws, dx) = set (runGradee g) dy (ws', x)
+learnee g ws = Learnee (Params ws) h where
+	h ps x = case cast ps of
+		Just ws' → x `seq` ws' `deepseq` y `seq` (y, back) where
+			y = view (runGradee g) (ws', x)
+			back dy = dy `seq` dx `seq` dws `deepseq` (Params dws, dx) where
+				(dws, dx) = set (runGradee g) dy (ws', x)
+		_ → error "learnee: learnee: impossible"
 
 computee ∷ Gradee a b → Learnee a b
-computee g = Learnee NoParams h where
+computee g = Learnee (Params NoParams) h where
 	h _ x = x `seq` y `seq` (y, back) where
 		y = view (runGradee g) x
-		back dy = dy `seq` dx `seq` (NoParams, dx) where
+		back dy = dy `seq` dx `seq` (Params NoParams, dx) where
 			dx = set (runGradee g) dy x
 
 makeBatches ∷ Int → [a] → [[a]]
@@ -85,8 +90,7 @@ shuffleList ∷ MonadRandom m ⇒ [a] → m [a]
 shuffleList ls = runRVar (shuffle ls) StdRandom
 
 miss ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → Norm b
-miss l c s = onLearnee miss' l where
-	miss' lt = snd $ learnPass lt c s
+miss l c s = snd $ learnPass l c s
 
 avg ∷ (Foldable t, Fractional a) ⇒ t a → a
 avg ls = sum ls / fromIntegral (length ls)
@@ -97,21 +101,21 @@ runLearnT = flip runStateT
 runLearn ∷ Learnee a b → State (Learnee a b) c → (c, Learnee a b)
 runLearn = flip runState
 
-learnPass ∷ (NFData w, HasNorm b) ⇒ LearneeT w a b → Cost b → Sample a b → (w, Norm b)
-learnPass (LearneeT ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, norm e) where
+learnPass ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → (Params, Norm b)
+learnPass (Learnee ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, norm e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
 	(dws, _) = back de
 
 trainOnce ∷ (MonadState (Learnee a b) m, HasNorm b) ⇒ Rational → Cost b → Sample a b → m (Norm b)
-trainOnce λ c s = state $ onLearnee train' where
-	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
-		(dw, e) = learnPass lt c s
+trainOnce λ c s = state train' where
+	train' l = dw `deepseq` (e, over params (subtract (fromRational λ * dw)) l) where
+		(dw, e) = learnPass l c s
 
 trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → Samples a b → m (Norm b)
-trainBatch λ c xs = state $ onLearnee train' where
-	train' lt = dw `deepseq` (e, toLearnee $!! over params (subtract (fromRational λ * dw)) lt) where
-		(dw, e) = (V.sum *** avg) ∘ V.unzip ∘ V.map (learnPass lt c) $ xs
+trainBatch λ c xs = state train' where
+	train' l = dw `deepseq` (e, over params (subtract (fromRational λ * dw)) l) where
+		(dw, e) = (V.sum *** avg) ∘ V.unzip ∘ V.map (learnPass l c) $ xs
 
 trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → Samples a b → m (Norm b)
 trainEpoch λ batch c xs = do

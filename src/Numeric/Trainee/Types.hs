@@ -2,22 +2,25 @@
 
 module Numeric.Trainee.Types (
 	Gradee(..),
-	Ow(..), NoParams(..), PairParams(..),
-	Parametric, LearneeT(..), params, forwardPass, Learnee(..), toLearnee, withLearnee, overLearnee, onLearnee,
+	Ow(..), NoParams(..),
+	params, forwardPass, Learnee(..),
 	Cost, HasNorm(..),
 	Sample(..), (⇢),
-	Samples, samples
+	Samples, samples,
+
+	module Numeric.Trainee.Params
 	) where
 
 import Prelude hiding (id, (.))
-import Prelude.Unicode
 
 import Control.Category
 import Control.DeepSeq
 import Control.Lens
-import Data.List (intersperse, intercalate)
+import Data.Typeable (cast)
 import qualified Data.Vector as V
 import Numeric.LinearAlgebra (Normed(norm_1), R, Vector)
+
+import Numeric.Trainee.Params
 
 newtype Gradee a b = Gradee {
 	runGradee ∷ Lens' a b }
@@ -65,67 +68,11 @@ instance Fractional NoParams where
 	fromRational _ = NoParams
 	recip _ = NoParams
 
-data PairParams l r = PairParams l r deriving (Eq, Ord, Read)
+data Learnee a b = Learnee {
+	_params ∷ Params,
+	_forwardPass ∷ Params → a → (b, b → (Params, a)) }
 
-instance (NFData l, NFData r) ⇒ NFData (PairParams l r) where
-	rnf (PairParams x y) = rnf x `seq` rnf y
-
-instance (Show l, Show r) ⇒ Show (PairParams l r) where
-	show (PairParams x y) = intercalate "\n" $ intersperse (replicate 10 '-') $
-		filter (not ∘ null) [show x, show y]
-
-instance (Num l, Num r) ⇒ Num (PairParams l r) where
-	PairParams l r + PairParams l' r' = PairParams (l + l') (r + r')
-	PairParams l r * PairParams l' r' = PairParams (l * l') (r * r')
-	abs (PairParams l r) = PairParams (abs l) (abs r)
-	signum (PairParams l r) = PairParams (signum l) (signum r)
-	fromInteger i = PairParams (fromInteger i) (fromInteger i)
-	negate (PairParams l r) = PairParams (negate l) (negate r)
-
-instance (Fractional l, Fractional r) ⇒ Fractional (PairParams l r) where
-	fromRational r = PairParams (fromRational r) (fromRational r)
-	recip (PairParams l r) = PairParams (recip l) (recip r)
-
-newtype VecParams a = VecParams (V.Vector a) deriving (Eq, Ord)
-
-instance NFData a ⇒ NFData (VecParams a) where
-	rnf (VecParams vs) = rnf vs
-
-instance Show a ⇒ Show (VecParams a) where
-	show (VecParams vs) = intercalate "\n" $ intersperse (replicate 10 '-') $
-		filter (not ∘ null) $ map show $ V.toList vs
-
-instance Num a ⇒ Num (VecParams a) where
-	VecParams l + VecParams r = VecParams $ V.zipWith (+) l r
-	VecParams l * VecParams r = VecParams $ V.zipWith (*) l r
-	abs (VecParams v) = VecParams $ V.map abs v
-	signum (VecParams v) = VecParams $ V.map signum v
-	fromInteger = VecParams ∘ V.singleton ∘ fromInteger
-	negate (VecParams v) = VecParams $ V.map negate v
-
-instance Fractional a ⇒ Fractional (VecParams a) where
-	fromRational = VecParams ∘ V.singleton ∘ fromRational
-	recip (VecParams v) = VecParams $ V.map recip v
-
-type Parametric w = (Read w, Show w, Num w, Fractional w, NFData w)
-
-data LearneeT w a b = LearneeT {
-	_params ∷ w,
-	_forwardPass ∷ w → a → (b, b → (w, a)) }
-
-makeLenses ''LearneeT
-
-instance NFData w ⇒ NFData (LearneeT w a b) where
-	rnf (LearneeT ws _) = rnf ws
-
-instance Show w ⇒ Show (LearneeT w a b) where
-	show (LearneeT ws _) = show ws
-
-data Learnee a b where
-	Learnee ∷ Parametric w ⇒ w → (w → a → (b, b → (w, a))) → Learnee a b
-
-toLearnee ∷ Parametric w ⇒ LearneeT w a b → Learnee a b
-toLearnee (LearneeT ws fn) = Learnee ws fn
+makeLenses ''Learnee
 
 instance NFData (Learnee a b) where
 	rnf (Learnee ws _) = rnf ws
@@ -134,26 +81,28 @@ instance Show (Learnee a b) where
 	show (Learnee ws _) = show ws
 
 instance Category Learnee where
-	id = Learnee NoParams fn where
-		fn _ x = (x, const (NoParams, x))
-	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
-		h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
-			(y, f') = f lws' x
-			(z, g') = g rws' y
-			up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
-				(rws'', dy) = g' dz
-				(lws'', dx) = f' dy
+	id = Learnee (Params NoParams) fn where
+		fn _ x = (x, const (Params NoParams, x))
+	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
+		h ws x = case cast ws of
+			(Just (lws', rws')) → x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
+				(y, f') = f lws' x
+				(z, g') = g rws' y
+				up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), dx) where
+					(rws'', dy) = g' dz
+					(lws'', dx) = f' dy
+			_ → error "learnee: (.): impossible"
 
-withLearnee ∷ Applicative f ⇒ (forall w . Parametric w ⇒ LearneeT w a b → f (LearneeT w a b)) → Learnee a b → f (Learnee a b)
-withLearnee act (Learnee ws fn) = toLearnee <$> act (LearneeT ws fn)
-
-overLearnee ∷ (forall w . Parametric w ⇒ LearneeT w a b → LearneeT w a b) → Learnee a b → Learnee a b
-overLearnee fn = runIdentity ∘ withLearnee (pure ∘ fn)
-
-onLearnee ∷ (forall w . Parametric w ⇒ LearneeT w a b → r) → Learnee a b → r
-onLearnee fn = fromLeft ∘ withLearnee (Left ∘ fn) where
-	fromLeft (Left v) = v
-	fromLeft _ = error "onLearnee"
+-- instance Category Learnee where
+-- 	id = Learnee NoParams fn where
+-- 		fn _ x = (x, const (NoParams, x))
+-- 	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
+-- 		h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
+-- 			(y, f') = f lws' x
+-- 			(z, g') = g rws' y
+-- 			up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
+-- 				(rws'', dy) = g' dz
+-- 				(lws'', dx) = f' dy
 
 type Cost b = b → b → (b, b)
 
