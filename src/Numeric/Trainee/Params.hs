@@ -4,13 +4,17 @@ module Numeric.Trainee.Params (
 	Parametric,
 	Params(..),
 	onParams, liftParams,
-	onParams2, liftParams2
+	onParams2, liftParams2,
+	castParams
 	) where
 
 import Prelude.Unicode
 
 import Control.DeepSeq
+import Data.Function (fix)
 import Data.List (intercalate, intersperse)
+import Data.Maybe (fromMaybe)
+import Data.Ratio ((%))
 import Data.Typeable
 import qualified Data.Vector as V
 
@@ -21,25 +25,29 @@ type Parametric w = (Show w, Num w, Fractional w, NFData w, Typeable w)
 -- combining many @Learnee@s will produce huge and unreadable params type
 data Params where
 	Params ∷ Parametric w ⇒ w → Params
+	-- | Implicitly converts to any params in `onParams2`, used as target for `fromIntegral` and `fromRational` implementation
+	AnyParam ∷ Rational → Params
 	deriving (Typeable)
 
 instance Show Params where
 	show (Params ws) = show ws
+	show (AnyParam r) = "any[" ++ show r ++ "]"
 
 instance Num Params where
 	(+) = liftParams2 (+)
 	(*) = liftParams2 (*)
 	abs = liftParams abs
 	signum = liftParams signum
-	fromInteger = Params ∘ (fromInteger ∷ Integer → Double)
+	fromInteger = AnyParam ∘ flip (%) 1
 	negate = liftParams negate
 
 instance Fractional Params where
-	fromRational = Params ∘ (fromRational ∷ Rational → Double)
+	fromRational = AnyParam
 	recip = liftParams recip
 
 instance NFData Params where
 	rnf (Params ws) = rnf ws
+	rnf (AnyParam r) = rnf r
 
 instance {-# OVERLAPPING #-} Show (Params, Params) where
 	show (l, r) = intercalate "\n" $ intersperse (replicate 10 '-') $
@@ -74,28 +82,39 @@ instance Fractional (V.Vector Params) where
 	recip = V.map recip
 
 onParams ∷ (forall w . Parametric w ⇒ w → a) → Params → a
+onParams fn (AnyParam r) = fn r
 onParams fn (Params ws) = fn ws
 
 liftParams ∷ (forall w . Parametric w ⇒ w → w) → Params → Params
-liftParams fn = onParams (Params ∘ fn)
+liftParams fn (AnyParam r) = AnyParam $ fn r
+liftParams fn p = onParams (Params ∘ fn) p
 
 onParams2 ∷ (forall w . Parametric w ⇒ w → w → a) → Params → Params → a
+onParams2 fn (AnyParam lr) (AnyParam rr) = fn lr rr
+onParams2 fn (AnyParam lr) (Params rws) = fn (fromRational lr) rws
+onParams2 fn (Params lws) (AnyParam rr) = fn lws (fromRational rr)
 onParams2 fn (Params lws) (Params rws) = case eqT' lws rws of
 	Just Refl → fn lws rws
-	_ → case (asDouble lws, asDouble rws) of
-		(Just _, Just _) → error "onParams2: impossible, inequal types, but both doubles"
-		(Just d, Nothing) → fn (fromRational (toRational d)) rws
-		(Nothing, Just d) → fn lws (fromRational (toRational d))
-		(Nothing, Nothing) → error $ "params type mismatch: '" ++ typeName lws ++ "' and '" ++ typeName rws ++ "'"
+	_ → error $ "params type mismatch: '" ++ typeName lws ++ "' and '" ++ typeName rws ++ "'"
 	where
 		eqT' ∷ (Typeable u, Typeable v) ⇒ u → v → Maybe (u :~: v)
 		eqT' _ _ = eqT
-		asDouble ∷ Typeable a ⇒ a → Maybe Double
-		asDouble = cast
-		typeName ∷ Typeable a ⇒ a → String
-		typeName = show ∘ typeRep ∘ proxy'
-		proxy' ∷ a → Proxy a
-		proxy' _ = Proxy
 
 liftParams2 ∷ (forall w . Parametric w ⇒ w → w → w) → Params → Params → Params
-liftParams2 fn = onParams2 ((Params ∘) ∘ fn)
+liftParams2 fn (AnyParam lr) (AnyParam rr) = AnyParam $ fn lr rr
+liftParams2 fn l r = onParams2 ((Params ∘) ∘ fn) l r
+
+-- | Force cast to specified type
+castParams ∷ Parametric a ⇒ Params → a
+castParams (AnyParam r) = fromRational r
+castParams (Params p) = fromMaybe (castError p) ∘ cast $ p where
+	castError ∷ (Parametric u, Parametric v) ⇒ u → v
+	castError x = fix $ \y → error $ "castParams: type mismatch, expected '" ++ typeName y ++ "', got '" ++ typeName x ++ "'"
+
+-- Utils
+
+typeName ∷ Typeable a ⇒ a → String
+typeName = show ∘ typeRep ∘ proxy'
+
+proxy' ∷ a → Proxy a
+proxy' _ = Proxy

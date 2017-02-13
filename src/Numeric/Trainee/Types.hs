@@ -12,11 +12,11 @@ module Numeric.Trainee.Types (
 	) where
 
 import Prelude hiding (id, (.))
+import Prelude.Unicode
 
 import Control.Category
 import Control.DeepSeq
 import Control.Lens
-import Data.Typeable (cast)
 import qualified Data.Vector as V
 import Numeric.LinearAlgebra (Normed(norm_1), R, Vector)
 
@@ -83,26 +83,13 @@ instance Show (Learnee a b) where
 instance Category Learnee where
 	id = Learnee (Params NoParams) fn where
 		fn _ x = (x, const (Params NoParams, x))
-	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
-		h (Params ws) x = case cast ws of
-			(Just (lws', rws')) → x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
-				(y, f') = f lws' x
-				(z, g') = g rws' y
-				up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), dx) where
-					(rws'', dy) = g' dz
-					(lws'', dx) = f' dy
-			_ → error "learnee: (.): impossible"
-
--- instance Category Learnee where
--- 	id = Learnee NoParams fn where
--- 		fn _ x = (x, const (NoParams, x))
--- 	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (PairParams lws rws) h where
--- 		h (PairParams lws' rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
--- 			(y, f') = f lws' x
--- 			(z, g') = g rws' y
--- 			up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (PairParams lws'' rws'', dx) where
--- 				(rws'', dy) = g' dz
--- 				(lws'', dx) = f' dy
+	Learnee rws g . Learnee lws f = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) (h ∘ castParams) where
+		h (lws', rws') x = x `seq` y `seq` lws' `deepseq` rws' `deepseq` (z, up) where
+			(y, f') = f lws' x
+			(z, g') = g rws' y
+			up dz = dz `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), dx) where
+				(rws'', dy) = g' dz
+				(lws'', dx) = f' dy
 
 type Cost b = b → b → (b, b)
 

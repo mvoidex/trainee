@@ -25,7 +25,6 @@ import Data.List (unfoldr)
 import Data.Random (runRVar, StdRandom(..), MonadRandom)
 import Data.Random.Internal.Source
 import Data.Random.List (shuffle)
-import Data.Typeable (cast)
 import qualified Data.Vector as V
 import Numeric.AD (AD)
 import Numeric.AD.Mode.Forward (Forward, auto, diff')
@@ -42,15 +41,13 @@ into ∷ Learnee a b → Learnee b c → Learnee a c
 into = (>>>)
 
 (‖) ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
-Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) h where
-	h (Params ws) (x, y) = case cast ws of
-		(Just (lws', rws')) → x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
-			(x', f') = f lws' x
-			(y', g') = g rws' y
-			up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), (dx, dy)) where
-				(lws'', dx) = f' dx'
-				(rws'', dy) = g' dy'
-		_ → error "learnee: (||): impossible"
+Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (Params (lws, rws)) (h ∘ castParams) where
+	h (lws', rws') (x, y) = x `seq` y `seq` x' `seq` y' `seq` lws' `deepseq` rws' `deepseq` ((x', y'), up) where
+		(x', f') = f lws' x
+		(y', g') = g rws' y
+		up (dx', dy') = dx' `seq` dy' `seq` dx `seq` dy `seq` lws'' `deepseq` rws'' `deepseq` (Params (lws'', rws''), (dx, dy)) where
+			(lws'', dx) = f' dx'
+			(rws'', dy) = g' dy'
 
 paired ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 paired = (‖)
@@ -68,13 +65,11 @@ crossEntropy ∷ Floating a ⇒ Cost a
 crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
 
 learnee ∷ Parametric w ⇒ Gradee (w, a) b → w → Learnee a b
-learnee g ws = Learnee (Params ws) h where
-	h (Params ps) x = case cast ps of
-		Just ws' → x `seq` ws' `deepseq` y `seq` (y, back) where
-			y = view (runGradee g) (ws', x)
-			back dy = dy `seq` dx `seq` dws `deepseq` (Params dws, dx) where
-				(dws, dx) = set (runGradee g) dy (ws', x)
-		_ → error "learnee: learnee: impossible"
+learnee g ws = Learnee (Params ws) (h ∘ castParams) where
+	h ws' x = x `seq` ws' `deepseq` y `seq` (y, back) where
+		y = view (runGradee g) (ws', x)
+		back dy = dy `seq` dx `seq` dws `deepseq` (Params dws, dx) where
+			(dws, dx) = set (runGradee g) dy (ws', x)
 
 computee ∷ Gradee a b → Learnee a b
 computee g = Learnee (Params NoParams) h where
