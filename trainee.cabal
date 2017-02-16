@@ -18,6 +18,7 @@ library
     Numeric.Trainee.Gradee
     Numeric.Trainee.Learnee
     Numeric.Trainee.Neural
+    Numeric.Trainee.Params
     Numeric.Trainee.Types
     Numeric.Trainee.Data
     Numeric.Trainee.Data.Common
