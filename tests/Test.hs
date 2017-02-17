@@ -21,7 +21,7 @@ import Text.Format
 
 import Numeric.Trainee.Data
 import Numeric.Trainee.Neural
-import Numeric.Trainee.Gradee (reshapeVec, flattenMat)
+import Numeric.Trainee.Gradee (reshapeVec, flattenMat, concatVecs)
 
 main ∷ IO ()
 main = hspec $
@@ -32,14 +32,14 @@ main = hspec $
 
 testXor ∷ IO ()
 testXor = do
-	n ← fc sigma 2 2 ⭃ fc sigma 2 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
+	n ← net $ fc sigma 2 2 ⭃ fc sigma 2 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
 	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared xorSamples
 	e `shouldSatisfy` (≤ 1e-4)
 	mapM_ (shouldPass n' 0.1) xorSamples
 
 testClassify ∷ IO ()
 testClassify = do
-	n ← fc sigma 4 4 ⭃ fc sigma 4 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
+	n ← net $ fc sigma 4 4 ⭃ fc sigma 4 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
 	let
 		cases ∷ [(String, Vector Double → Vector Double)]
 		cases = [
@@ -62,7 +62,7 @@ instance Show (Vector a) ⇒ FormatBuild (Vector a)
 
 testIris ∷ IO ()
 testIris = do
-	n ← fc sigma 4 12 ⭃ fc sigma 12 3 ∷ IO (Net Double)
+	n ← net $ fc sigma 4 12 ⭃ fc sigma 12 3 ∷ IO (Net Double)
 	classes ← readIrisData "data/classify/iris/iris.data"
 	(_, n') ← runLearnT n $ hoist (`evalStateT` (rightAnswers n classes, 0)) $ learnIris classes
 	let
@@ -93,13 +93,14 @@ testIris = do
 
 testMnist ∷ IO ()
 testMnist = do
-	n ←
-		return (computee (reshapeVec 28)) ⭃
-		conv2 sigma (5, 5) ⭃
-		conv2 sigma (5, 5) ⭃
-		return (computee flattenMat) ⭃
-		fc sigma 400 32 ⭃
-		fc sigma 32 10
+	n ← net $
+		return (computee (reshapeVec 28)) ⭃ ndup 1 ⭃
+		dconv2 sigma 1 8 (5, 5) ⭃
+		dconv2 sigma 8 8 (5, 5) ⭃
+		npar 8 (return (computee flattenMat)) ⭃
+		return (computee concatVecs) ⭃
+		fc sigma 3200 512 ⭃
+		fc sigma 512 10
 		∷ IO (Net Double)
 	putStrLn "reading train data"
 	smps ← readMnist "data/classify/mnist/train.csv"
@@ -109,11 +110,11 @@ testMnist = do
 	where
 		learnMnist ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) IO ()
 		learnMnist smps = do
-			ixs ← makeBatches 20 <$> shuffleList [0 .. V.length smps - 1]
+			ixs ← makeBatches 100 <$> shuffleList [0 .. V.length smps - 1]
 			es ← forM ixs $ \is → do
 				let
 					b = V.fromList $ map (smps V.!) is
-				e ← trainBatch 0.01 crossEntropy b
+				e ← trainBatch 0.0001 crossEntropy b
 				liftIO $ putStrLn $ "batch error: {}" ~~ e
 				return e
 			let

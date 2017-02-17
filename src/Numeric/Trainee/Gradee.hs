@@ -4,13 +4,13 @@ module Numeric.Trainee.Gradee (
 	Gradee(..), gradee, ad,
 	Unary, Binary,
 	unary, binary,
-	dup, vdup,
-	conjoin, plus, vconjoin, vsum,
+	dup, vdup, vdupWith,
+	conjoin, plus, vconjoin, vsum, vfold,
 	swap,
 
 	matMat, matVec, odot,
 	corrVec, corrMat,
-	flattenMat, reshapeVec,
+	flattenMat, reshapeVec, concatVecs,
 	transposeMat,
 	vecRow, vecCol,
 	biasVec, biasMat
@@ -64,6 +64,11 @@ dup = gradee (\x → (x, x)) (\_ (dx', dx'') → dx' + dx'')
 vdup ∷ Num a ⇒ Int → Gradee a (V.Vector a)
 vdup n = gradee (V.replicate n) (const V.sum)
 
+vdupWith ∷ (a → a → a) → Int → Gradee a (V.Vector a)
+vdupWith fn n
+	| n ≤ 0 = error "vdupWith: negative argument"
+	| otherwise = gradee (V.replicate n) (const $ V.foldr1 fn)
+
 conjoin ∷ Num a ⇒ Gradee (a, a) a
 conjoin = binary (+)
 
@@ -75,6 +80,9 @@ vconjoin = ad V.sum
 
 vsum ∷ Num a ⇒ Gradee (V.Vector a) a
 vsum = vconjoin
+
+vfold ∷ (a → a → a) → Gradee (V.Vector a) a
+vfold fn = gradee (V.foldr1 fn) (V.replicate ∘ V.length)
 
 swap ∷ Gradee (a, b) (b, a)
 swap = gradee (\(x, y) → (y, x)) (\_ (dy, dx) → (dx, dy))
@@ -105,6 +113,11 @@ flattenMat = gradee flatten backprop where
 
 reshapeVec ∷ Numeric a ⇒ Int → Gradee (Vector a) (Matrix a)
 reshapeVec cols' = gradee (reshape cols') (const flatten)
+
+concatVecs ∷ Numeric a ⇒ Gradee (V.Vector (Vector a)) (Vector a)
+concatVecs = gradee
+	(vjoin ∘ V.toList)
+	(\vs → V.fromList ∘ takesV (V.toList (V.map size vs)))
 
 transposeMat ∷ Numeric a ⇒ Gradee (Matrix a) (Matrix a)
 transposeMat = gradee tr (const tr)

@@ -70,12 +70,30 @@ instance {-# OVERLAPPING #-} Show (V.Vector Params) where
 		filter (not ∘ null) ∘ map show ∘ V.toList $ ps
 
 instance Num (V.Vector Params) where
-	ls + rs = V.zipWith (+) ls rs
-	ls * rs = V.zipWith (*) ls rs
+	ls + rs = uncurry (V.zipWith (+)) $ unifyVecs ls rs
+	ls * rs = uncurry (V.zipWith (*)) $ unifyVecs ls rs
 	abs = V.map abs
 	signum = V.map signum
 	fromInteger = V.singleton ∘ fromInteger
 	negate = V.map negate
+
+unifyVecs ∷ V.Vector Params → V.Vector Params → (V.Vector Params, V.Vector Params)
+unifyVecs x y
+	| V.length x ≡ V.length y = (x, y)
+	| anyParamVec x ∨ anyParamVec y = (extend x, extend y)
+	| otherwise = error $ concat [
+		"unifyVecs: params vectors length mismatch: ",
+		show $ V.length x,
+		" and ",
+		show $ V.length y]
+	where
+		anyParamVec v = V.length v ≡ 1 ∧ case V.head v of
+			AnyParam _ → True
+			_ → False
+		l = max (V.length x) (V.length y)
+		extend v
+			| anyParamVec v = V.replicate l (V.head v)
+			| otherwise = v
 
 instance Fractional (V.Vector Params) where
 	fromRational = V.singleton ∘ fromRational

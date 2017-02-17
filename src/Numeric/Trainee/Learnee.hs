@@ -3,7 +3,7 @@
 
 module Numeric.Trainee.Learnee (
 	eval,
-	(⇉), (‖), into, paired,
+	(⇉), (‖), into, paired, parallel,
 	cost, squared, logLoss, crossEntropy,
 	learnee, computee,
 
@@ -16,7 +16,7 @@ module Numeric.Trainee.Learnee (
 
 import Prelude.Unicode
 
-import Control.Arrow ((***), (>>>))
+import Control.Arrow ((***), (>>>), first)
 import Control.DeepSeq
 import Control.Lens
 import Control.Monad.State.Strict
@@ -29,7 +29,7 @@ import qualified Data.Vector as V
 import Numeric.AD (AD)
 import Numeric.AD.Mode.Forward (Forward, auto, diff')
 
-import Numeric.Trainee.Types
+import Numeric.Trainee.Types hiding (Ow(..))
 
 eval ∷ Learnee a b → a → b
 eval (Learnee ws f) = fst ∘ f ws
@@ -51,6 +51,14 @@ Learnee lws f ‖ Learnee rws g = lws `deepseq` rws `deepseq` Learnee (Params (l
 
 paired ∷ Learnee a b → Learnee a' b' → Learnee (a, a') (b, b')
 paired = (‖)
+
+parallel ∷ V.Vector (Learnee a b) → Learnee (V.Vector a) (V.Vector b)
+parallel ls = ls `deepseq` Learnee (Params wss) (h ∘ castParams) where
+	wss = V.map (view params) ls
+	fs = V.map (view forwardPass) ls
+	h wss' xs = xs `seq` ys `seq` wss' `deepseq` (ys, up) where
+		(ys, gs) = V.unzip $ V.zipWith3 id fs wss' xs
+		up ds = first Params $ V.unzip $ V.zipWith id gs ds
 
 cost ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a) → AD s (Forward a)) → Cost a
 cost fn y' = diff' (fn (auto y'))
