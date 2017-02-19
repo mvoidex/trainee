@@ -118,7 +118,7 @@ trainOnce λ c s = state train' where
 trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → Samples a b → m (Norm b)
 trainBatch λ c xs = state train' where
 	train' l = dw `deepseq` (e, over params (subtract (fromRational λ * dw)) l) where
-		(dw, e) = (V.sum *** avg) ∘ V.unzip ∘ V.map (learnPass l c) $ xs
+		(dw, e) = (avg *** avg) ∘ V.unzip ∘ V.map (learnPass l c) $ xs
 
 trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → Samples a b → m (Norm b)
 trainEpoch λ batch c xs = do
