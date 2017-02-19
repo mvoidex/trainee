@@ -15,6 +15,7 @@ import Control.Monad.Morph
 import qualified Data.Attoparsec.Text as A
 import qualified Data.Text.IO as T
 import qualified Data.Vector as V
+import System.Random (mkStdGen)
 import Test.Hspec
 import Numeric.LinearAlgebra hiding (conv2, conv)
 import Text.Format
@@ -32,14 +33,14 @@ main = hspec $
 
 testXor ∷ IO ()
 testXor = do
-	n ← net $ fc sigma 2 2 ⭃ fc sigma 2 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
-	(e, n') ← runLearnT n $ trainUntil 1.0 10000 4 1e-4 squared xorSamples
+	n ← return $ netSeed (mkStdGen 0) $ fc sigma 2 2 ⭃ fc sigma 2 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
+	(e, n') ← runLearnT n $ trainUntil 5.0 10000 4 1e-4 squared xorSamples
 	e `shouldSatisfy` (≤ 1e-4)
 	mapM_ (shouldPass n' 0.1) xorSamples
 
 testClassify ∷ IO ()
 testClassify = do
-	n ← net $ fc sigma 4 4 ⭃ fc sigma 4 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
+	n ← return $ netSeed (mkStdGen 0) $ fc sigma 4 4 ⭃ fc sigma 4 2 ⭃ fc sigma 2 1 ∷ IO (Net Double)
 	let
 		cases ∷ [(String, Vector Double → Vector Double)]
 		cases = [
@@ -51,7 +52,7 @@ testClassify = do
 		fn f = vector ∘ return ∘ fromIntegral ∘ fromEnum ∘ f ∘ toList
 	forM_ cases $ \(name, fun) → do
 		classes ← readBalloonSamples $ "data/classify/balloon/{name}.data" ~~ ("name" ~% name)
-		(e, n') ← runLearnT n $ trainUntil 1.0 1000 10 1e-4 squared classes
+		(e, n') ← runLearnT n $ trainUntil 10.0 1000 10 1e-4 squared classes
 		e `shouldSatisfy` (≤ 1e-4)
 		mapM_ (shouldPass n' 0.1) [xs ⇢ fun xs |
 			xs ← map vector (replicateM 4 [0.0, 1.0])]
@@ -62,11 +63,11 @@ instance Show (Vector a) ⇒ FormatBuild (Vector a)
 
 testIris ∷ IO ()
 testIris = do
-	n ← net $ fc sigma 4 12 ⭃ fc sigma 12 3 ∷ IO (Net Double)
+	n ← return $ netSeed (mkStdGen 0) $ fc sigma 4 12 ⭃ fc sigma 12 3 ∷ IO (Net Double)
 	classes ← readIrisData "data/classify/iris/iris.data"
 	(_, n') ← runLearnT n $ hoist (`evalStateT` (rightAnswers n classes, 0)) $ learnIris classes
 	let
-		failedSamples = V.filter (not ∘ rightClass n' ∘ snd) $ V.zip (V.fromList ([1..] ∷ [Integer])) classes
+		failedSamples = filter (not ∘ rightClass n' ∘ snd) $ zip ([1..] ∷ [Integer]) (V.toList classes)
 	putStrLn "--- Done. ---"
 	putStrLn "Failed samples:"
 	forM_ failedSamples $ \(i, Sample inp outp) → putStrLn $ "{n}\t{input} → {output} ≢ {right}"
@@ -74,11 +75,11 @@ testIris = do
 		~~ ("input" ~% inp)
 		~~ ("output" ~% eval n' inp)
 		~~ ("right" ~% outp)
-	length failedSamples `shouldSatisfy` (≤ 15)
+	length failedSamples `shouldSatisfy` (≤ 2)
 	where
 		learnIris ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) (StateT (Int, Int) IO) ()
 		learnIris classes = do
-			e ← fmap last $ replicateM 100 $ trainEpoch 0.01 150 crossEntropy classes
+			e ← fmap last $ replicateM 100 $ trainEpoch 1.0 150 crossEntropy classes
 			n' ← get
 			let
 				ans = rightAnswers n' classes
@@ -114,7 +115,7 @@ testMnist = do
 			es ← forM ixs $ \is → do
 				let
 					b = V.fromList $ map (smps V.!) is
-				e ← trainBatch 0.0001 crossEntropy b
+				e ← trainBatch 0.01 crossEntropy b
 				liftIO $ putStrLn $ "batch error: {}" ~~ e
 				return e
 			let

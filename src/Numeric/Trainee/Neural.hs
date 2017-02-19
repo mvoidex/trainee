@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, FlexibleContexts, RankNTypes #-}
 
 module Numeric.Trainee.Neural (
-	Net, net,
+	Net, net, netSeed,
 	(⭃),
 	ndup, npar, ndupWith, nsum, nfold,
 	fc, conv, conv2,
@@ -22,7 +22,7 @@ import Control.Monad (replicateM, liftM2)
 import Data.Random
 import qualified Data.Vector as V
 import Numeric.LinearAlgebra hiding (conv, conv2)
-import System.Random (newStdGen)
+import System.Random (newStdGen, StdGen)
 
 import Numeric.Trainee.Types
 import Numeric.Trainee.Gradee
@@ -31,7 +31,10 @@ import Numeric.Trainee.Learnee
 type Net a = Learnee (Vector a) (Vector a)
 
 net ∷ RVar a → IO a
-net n = (fst ∘ sampleState n) <$> newStdGen
+net n = netSeed <$> newStdGen <*> pure n
+
+netSeed ∷ StdGen → RVar a → a
+netSeed g n = fst $ sampleState n g
 
 (⭃) ∷ RVar (Learnee a b) → RVar (Learnee b c) → RVar (Learnee a c)
 n ⭃ l = liftM2 (⇉) n l
@@ -126,4 +129,4 @@ convolver2 w h = do
 	return $ learnee corrMat ((w >< h) ws)
 
 normVar ∷ (Distribution Normal a, Fractional a) ⇒ RVar a
-normVar = normal 0.0 0.1
+normVar = normal 0.0 0.25
