@@ -60,14 +60,14 @@ nfold ∷ (a → a → a) → RVar (Learnee (V.Vector a) a)
 nfold = return ∘ computee ∘ vfold
 
 -- | Fully connected layer
-fc ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → Int → RVar (Net a)
+fc ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → Int → RVar (Net a)
 fc f inputs outputs = do
 	s ← summator inputs outputs
 	b ← biaser outputs
 	return $ s ⇉ b ⇉ activator f
 
 -- | Convolution layer 1-d
-conv ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → RVar (Net a)
+conv ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → RVar (Net a)
 conv f w = do
 	c ← convolver w
 	b ← do
@@ -76,7 +76,7 @@ conv f w = do
 	return $ c ⇉ b ⇉ activator f
 
 -- | Convolution layer 2-d
-conv2 ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Matrix a) → (Int, Int) → RVar (Learnee (Matrix a) (Matrix a))
+conv2 ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Matrix a) → (Int, Int) → RVar (Learnee (Matrix a) (Matrix a))
 conv2 f (w, h) = do
 	c ← convolver2 w h
 	b ← do
@@ -85,13 +85,13 @@ conv2 f (w, h) = do
 	return $ c ⇉ b ⇉ activator f
 
 -- | Depth (with several input and output channels) convolution 1-d
-dconv ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → Int → Int → RVar (Learnee (V.Vector (Vector a)) (V.Vector (Vector a)))
+dconv ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → Int → Int → RVar (Learnee (V.Vector (Vector a)) (V.Vector (Vector a)))
 dconv f inputs outputs width =
 	ndupWith (V.zipWith (+)) outputs ⭃
 	npar outputs (npar inputs (conv f width) ⭃ nsum)
 
 -- | Depth (with several input and output channels) convolution 2-d
-dconv2 ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Unary (Matrix a) → Int → Int → (Int, Int) → RVar (Learnee (V.Vector (Matrix a)) (V.Vector (Matrix a)))
+dconv2 ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Matrix a) → Int → Int → (Int, Int) → RVar (Learnee (V.Vector (Matrix a)) (V.Vector (Matrix a)))
 dconv2 f inputs outputs (w, h) =
 	ndupWith (V.zipWith (+)) outputs ⭃
 	npar outputs (npar inputs (conv2 f (w, h)) ⭃ nsum)
@@ -105,12 +105,12 @@ relu t = 0.5 * (1 + signum t) * t
 softplus ∷ Floating a ⇒ a → a
 softplus t = log (1 + exp t)
 
-summator ∷ (Distribution Normal a, Fractional a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → Int → RVar (Net a)
+summator ∷ (Distribution Normal a, Fractional a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Int → Int → RVar (Net a)
 summator inputs outputs = do
 	ws ← replicateM (inputs * outputs) normVar
 	return $ learnee matVec ((outputs >< inputs) ws)
 
-biaser ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → RVar (Net a)
+biaser ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Int → RVar (Net a)
 biaser sz = do
 	bs ← replicateM sz normVar
 	return $ learnee odot (fromList bs)
@@ -118,12 +118,12 @@ biaser sz = do
 activator ∷ Num a ⇒ Unary a → Learnee a a
 activator f = computee (unary f)
 
-convolver ∷ (Distribution Normal a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → RVar (Net a)
+convolver ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Int → RVar (Net a)
 convolver w = do
 	ws ← replicateM w normVar
 	return $ learnee corrVec (fromList ws)
 
-convolver2 ∷ (Distribution Normal a, Fractional a, Numeric a, Num (Vector a), Parametric a) ⇒ Int → Int → RVar (Learnee (Matrix a) (Matrix a))
+convolver2 ∷ (Distribution Normal a, Fractional a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Int → Int → RVar (Learnee (Matrix a) (Matrix a))
 convolver2 w h = do
 	ws ← replicateM (w * h) normVar
 	return $ learnee corrMat ((w >< h) ws)

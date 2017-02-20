@@ -4,7 +4,7 @@
 module Numeric.Trainee.Learnee (
 	eval,
 	(⇉), (‖), into, paired, parallel,
-	cost, squared, logLoss, crossEntropy,
+	loss, regularization, squared, logLoss, crossEntropy, lossL1, lossL2,
 	learnee, computee,
 
 	makeBatches, shuffleList,
@@ -60,17 +60,26 @@ parallel ls = ls `deepseq` Learnee (Params wss) (h ∘ castParams) where
 		(ys, gs) = V.unzip $ V.zipWith3 id fs wss' xs
 		up ds = first Params $ V.unzip $ V.zipWith id gs ds
 
-cost ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a) → AD s (Forward a)) → Cost a
-cost fn y' = diff' (fn (auto y'))
+loss ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a) → AD s (Forward a)) → Loss a
+loss fn y' = diff' (fn (auto y'))
 
-squared ∷ Floating a ⇒ Cost a
-squared = cost $ \y' y → (y - y') ** 2
+regularization ∷ Num a ⇒ (forall s . AD s (Forward a) → AD s (Forward a)) → Regularization a
+regularization fn = diff' fn
 
-logLoss ∷ Floating a ⇒ Cost a
-logLoss = cost $ \y' y → - (y' * log y)
+squared ∷ Floating a ⇒ Loss a
+squared = loss $ \y' y → (y - y') ** 2
 
-crossEntropy ∷ Floating a ⇒ Cost a
-crossEntropy = cost $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
+logLoss ∷ Floating a ⇒ Loss a
+logLoss = loss $ \y' y → - (y' * log y)
+
+crossEntropy ∷ Floating a ⇒ Loss a
+crossEntropy = loss $ \y' y → - (y' * log y + (1 - y') * log (1 - y))
+
+lossL1 ∷ Floating a ⇒ Regularization a
+lossL1 = regularization abs
+
+lossL2 ∷ Floating a ⇒ Regularization a
+lossL2 = regularization (**2)
 
 learnee ∷ Parametric w ⇒ Gradee (w, a) b → w → Learnee a b
 learnee g ws = Learnee (Params ws) (h ∘ castParams) where
@@ -92,7 +101,7 @@ makeBatches sz = takeWhile (not ∘ null) ∘ unfoldr (Just ∘ splitAt sz)
 shuffleList ∷ MonadRandom m ⇒ [a] → m [a]
 shuffleList ls = runRVar (shuffle ls) StdRandom
 
-miss ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → Norm b
+miss ∷ HasNorm b ⇒ Learnee a b → Loss b → Sample a b → Norm b
 miss l c s = snd $ learnPass l c s
 
 avg ∷ (Foldable t, Fractional a) ⇒ t a → a
@@ -104,23 +113,23 @@ runLearnT = flip runStateT
 runLearn ∷ Learnee a b → State (Learnee a b) c → (c, Learnee a b)
 runLearn = flip runState
 
-learnPass ∷ HasNorm b ⇒ Learnee a b → Cost b → Sample a b → (Params, Norm b)
+learnPass ∷ HasNorm b ⇒ Learnee a b → Loss b → Sample a b → (Params, Norm b)
 learnPass (Learnee ws f) c (Sample x y') = x `seq` ws `deepseq` y' `seq` y `seq` dws `deepseq` (dws, norm e) where
 	(y, back) = f ws x
 	(e, de) = c y' y
 	(dws, _) = back de
 
-trainOnce ∷ (MonadState (Learnee a b) m, HasNorm b) ⇒ Rational → Cost b → Sample a b → m (Norm b)
+trainOnce ∷ (MonadState (Learnee a b) m, HasNorm b) ⇒ Rational → Loss b → Sample a b → m (Norm b)
 trainOnce λ c s = state train' where
 	train' l = dw `deepseq` (e, over params (subtract (fromRational λ * dw)) l) where
 		(dw, e) = learnPass l c s
 
-trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Cost b → Samples a b → m (Norm b)
+trainBatch ∷ (MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Loss b → Samples a b → m (Norm b)
 trainBatch λ c xs = state train' where
 	train' l = dw `deepseq` (e, over params (subtract (fromRational λ * dw)) l) where
 		(dw, e) = (avg *** avg) ∘ V.unzip ∘ V.map (learnPass l c) $ xs
 
-trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Cost b → Samples a b → m (Norm b)
+trainEpoch ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b)) ⇒ Rational → Int → Loss b → Samples a b → m (Norm b)
 trainEpoch λ batch c xs = do
 	ix' ← shuffleList [0 .. V.length xs - 1]
 	fmap (avg ∘ concat) ∘ mapM (\ixs → fmap (replicate (length ixs)) (trainBatch λ c (samples' ixs xs))) $ makeBatches batch ix'
@@ -133,7 +142,7 @@ instance (Monoid w, MonadRandom m) ⇒ MonadRandom (WriterT w m) where
 instance MonadRandom m ⇒ MonadRandom (StateT s m) where
 	getRandomPrim = lift ∘ getRandomPrim
 
-trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b), Ord (Norm b)) ⇒ Rational → Int → Int → Norm b → Cost b → Samples a b → m (Norm b)
+trainUntil ∷ (MonadRandom m, MonadState (Learnee a b) m, HasNorm b, Fractional (Norm b), Ord (Norm b)) ⇒ Rational → Int → Int → Norm b → Loss b → Samples a b → m (Norm b)
 trainUntil λ epochs batch eps c xs = do
 	bs ← execWriterT $ train' epochs
 	return $ last bs

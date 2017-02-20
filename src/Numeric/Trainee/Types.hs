@@ -2,9 +2,9 @@
 
 module Numeric.Trainee.Types (
 	Gradee(..),
-	Ow(..), NoParams(..),
+	Ow(..),
 	params, forwardPass, Learnee(..),
-	Cost, HasNorm(..),
+	Loss, Regularization, HasNorm(..),
 	Sample(..), (⇢),
 	Samples, samples,
 
@@ -48,26 +48,6 @@ instance Ow Gradee where
 		g' = V.map (view f)
 		s' = V.zipWith (flip (set f))
 
-data NoParams = NoParams deriving (Eq, Ord, Read, Enum, Bounded)
-
-instance NFData NoParams where
-	rnf NoParams = ()
-
-instance Show NoParams where
-	show NoParams = ""
-
-instance Num NoParams where
-	_ + _ = NoParams
-	_ * _ = NoParams
-	abs _ = NoParams
-	signum _ = NoParams
-	fromInteger _ = NoParams
-	negate _ = NoParams
-
-instance Fractional NoParams where
-	fromRational _ = NoParams
-	recip _ = NoParams
-
 data Learnee a b = Learnee {
 	_params ∷ Params,
 	_forwardPass ∷ Params → a → (b, b → (Params, a)) }
@@ -91,7 +71,9 @@ instance Category Learnee where
 				(rws'', dy) = g' dz
 				(lws'', dx) = f' dy
 
-type Cost b = b → b → (b, b)
+type Loss b = b → b → (b, b)
+
+type Regularization b = b → (b, b)
 
 class HasNorm a where
 	type Norm a
