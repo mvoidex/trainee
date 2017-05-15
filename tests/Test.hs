@@ -96,12 +96,11 @@ testMnist ∷ IO ()
 testMnist = do
 	n ← net $
 		return (computee (reshapeVec 28)) ⭃ ndup 1 ⭃
-		dconv2 sigma 1 8 (5, 5) ⭃
-		dconv2 sigma 8 8 (5, 5) ⭃
-		npar 8 (return (computee flattenMat)) ⭃
-		return (computee concatVecs) ⭃
-		fc sigma 3200 512 ⭃
-		fc sigma 512 10
+		npar 1 (pad2 2 2) ⭃ dconv2 sigma 1 32 (5, 5) ⭃ npar 32 (maxPool2 2 2) ⭃
+		npar 32 (pad2 2 2) ⭃ dconv2 sigma 32 64 (5, 5) ⭃ npar 64 (maxPool2 2 2) ⭃
+		npar 64 (return $ computee flattenMat) ⭃ return (computee concatVecs) ⭃
+		fc sigma (7 * 7 * 64) 1024 ⭃
+		fc sigma 1024 10
 		∷ IO (Net Double)
 	putStrLn "reading train data"
 	smps ← readMnist "data/classify/mnist/train.csv"
@@ -111,12 +110,12 @@ testMnist = do
 	where
 		learnMnist ∷ Samples (Vector Double) (Vector Double) → StateT (Net Double) IO ()
 		learnMnist smps = do
-			ixs ← makeBatches 100 <$> shuffleList [0 .. V.length smps - 1]
-			es ← forM ixs $ \is → do
-				let
-					b = V.fromList $ map (smps V.!) is
-				e ← trainBatch 0.01 crossEntropy b
-				liftIO $ putStrLn $ "batch error: {}" ~~ e
+			ixs ← shuffleList [0 .. V.length smps - 1]
+			es ← forM ixs $ \i → do
+				-- let
+				-- 	b = V.fromList $ map (smps V.!) is
+				e ← trainOnce 0.001 crossEntropy (smps V.! i)
+				liftIO $ putStrLn $ "error: {}" ~~ e
 				return e
 			let
 				e = avg es

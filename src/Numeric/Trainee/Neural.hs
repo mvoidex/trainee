@@ -4,6 +4,8 @@ module Numeric.Trainee.Neural (
 	Net, net, netSeed,
 	(⭃),
 	ndup, npar, ndupWith, nsum, nfold,
+	pad, pad2,
+	maxPool, maxPool2,
 	fc, conv, conv2,
 	dconv, dconv2,
 
@@ -58,6 +60,22 @@ nsum = return (computee vsum)
 -- | Join layers with custom sum
 nfold ∷ (a → a → a) → RVar (Learnee (V.Vector a) a)
 nfold = return ∘ computee ∘ vfold
+
+-- | Padding
+pad ∷ Numeric a ⇒ Int → RVar (Learnee (Vector a) (Vector a))
+pad = return ∘ computee ∘ padVec
+
+-- | 2d padding
+pad2 ∷ Numeric a ⇒ Int → Int → RVar (Learnee (Matrix a) (Matrix a))
+pad2 w h = return ∘ computee $ padMat w h
+
+-- | Max pool layer
+maxPool ∷ (RealFrac a, Numeric a) ⇒ Int → RVar (Learnee (Vector a) (Vector a))
+maxPool = return ∘ computee ∘ maxPoolVec
+
+-- | 2d max pool layer
+maxPool2 ∷ (RealFrac a, Numeric a) ⇒ Int → Int → RVar (Learnee (Matrix a) (Matrix a))
+maxPool2 w h = return ∘ computee $ maxPoolMat w h
 
 -- | Fully connected layer
 fc ∷ (Distribution Normal a, Numeric a, Parametric (Vector a), Parametric a) ⇒ Unary (Vector a) → Int → Int → RVar (Net a)
