@@ -137,17 +137,17 @@ biasMat ∷ Numeric a ⇒ Gradee (a, Matrix a) (Matrix a)
 biasMat = gradee2 (\b m → cmap (+ b) m) backprop where
 	backprop _ _ dm = (sumElements dm, dm)
 
-maxPoolVec ∷ Numeric a ⇒ Int → Gradee (Vector a) (Vector a)
+maxPoolVec ∷ (RealFrac a, Numeric a) ⇒ Int → Gradee (Vector a) (Vector a)
 maxPoolVec n = gradee pool' unpool' where
 	pool' v = build (size v `div` n) $ \i → maxElement (subVector (round i * n) n v)
 	unpool' v dv = accum zero (+) (zip maxIndices (toList dv)) where
 		maxIndices = map (\i → maxIndex (subVector (i * n) n v) + i * n) [0 .. size dv - 1]
 		zero = build (size v) (const 0)
 
-maxPoolMat ∷ Numeric a ⇒ Int → Int → Gradee (Matrix a) (Matrix a)
+maxPoolMat ∷ (RealFrac a, Numeric a) ⇒ Int → Int → Gradee (Matrix a) (Matrix a)
 maxPoolMat w h = gradee pool' unpool' where
 	pool' m = build (rows m `div` h, cols m `div` w) $ \i j → maxElement (subMatrix (round i * h, round j * w) (h, w) m)
 	unpool' m dm = accum zero (+) (zip maxIndices (toList $ flatten dm)) where
-		maxIndices = map (\(i, j) → maxIndex (subMatrix (i * h, j * w) (h, w) m) `plus` (i * h, j * w)) [(i, j) | i ← [0 .. rows dm - 1], j ← [0 .. cols dm - 1]]
+		maxIndices = map (\(i, j) → maxIndex (subMatrix (i * h, j * w) (h, w) m) `biplus` (i * h, j * w)) [(i, j) | i ← [0 .. rows dm - 1], j ← [0 .. cols dm - 1]]
 		zero = build (size m) (const $ const 0)
-		plus (lx, ly) (rx, ry) = (lx + rx, ly + ry)
+		biplus (lx, ly) (rx, ry) = (lx + rx, ly + ry)
