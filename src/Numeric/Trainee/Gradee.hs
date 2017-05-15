@@ -14,7 +14,8 @@ module Numeric.Trainee.Gradee (
 	transposeMat,
 	vecRow, vecCol,
 	biasVec, biasMat,
-	maxPoolVec, maxPoolMat
+	maxPoolVec, maxPoolMat,
+	padVec, padMat
 	) where
 
 import Prelude hiding (id, (.))
@@ -151,3 +152,15 @@ maxPoolMat w h = gradee pool' unpool' where
 		maxIndices = map (\(i, j) → maxIndex (subMatrix (i * h, j * w) (h, w) m) `biplus` (i * h, j * w)) [(i, j) | i ← [0 .. rows dm - 1], j ← [0 .. cols dm - 1]]
 		zero = build (size m) (const $ const 0)
 		biplus (lx, ly) (rx, ry) = (lx + rx, ly + ry)
+
+padVec ∷ Numeric a ⇒ Int → Gradee (Vector a) (Vector a)
+padVec n = gradee pad' unpad' where
+	pad' v = vjoin [zeroes', v, zeroes'] where
+		zeroes' = build n (const 0)
+	unpad' = subVector n ∘ size
+
+padMat ∷ Numeric a ⇒ Int → Int → Gradee (Matrix a) (Matrix a)
+padMat w h = gradee pad' unpad' where
+	pad' m = diagBlock [zeroes', m, zeroes'] where
+		zeroes' = build (h, w) (const $ const 0)
+	unpad' = subMatrix (h, w) ∘ size
